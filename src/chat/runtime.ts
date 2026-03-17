@@ -201,13 +201,14 @@ export class ChatRuntime {
           continue;
         }
 
-        const sent = await this.transport.sendText(chat.jid, bubble);
+        const outboundText = this.applyMessagePrefix(bubble);
+        const sent = await this.transport.sendText(chat.jid, outboundText);
         this.db.createBotMessage(
           chat.jid,
           chat.type,
           this.botJid,
           sent.externalId,
-          bubble,
+          outboundText,
           sent.timestamp,
           this.runtimeContext.botConfig.blockSize
         );
@@ -261,5 +262,10 @@ export class ChatRuntime {
         error: error instanceof Error ? error.message : String(error)
       });
     }
+  }
+
+  private applyMessagePrefix(text: string): string {
+    const prefix = this.runtimeContext.botConfig.messagePrefix;
+    return prefix ? `${prefix}${text}` : text;
   }
 }

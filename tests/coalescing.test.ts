@@ -110,4 +110,39 @@ describe("turn coalescing", () => {
     expect(gateway.replyInputs[0]?.pendingMessages.map((message) => message.externalId)).toEqual(["group-trigger"]);
   });
 
+  it("applies the configured message prefix to each outbound bubble", async () => {
+    const root = createTempRoot();
+    roots.push(root);
+    const runtimeContext = createRuntimeContext(root);
+    runtimeContext.botConfig.messagePrefix = "[Maya] ";
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const gateway = new FakeGateway();
+    gateway.replyResult = {
+      reply: "first bubble\n\nsecond bubble",
+      memoryOperations: []
+    };
+    const transport = new MockTransport();
+    const logger = createLogger(`${runtimeContext.paths.logsDir}/chat-prefix-test.log`, "chat-prefix-test");
+    const runtime = new ChatRuntime(runtimeContext, db, transport, gateway, logger);
+    await runtime.start();
+
+    await transport.push(
+      makeIncomingMessage({
+        externalId: "dm-prefix-1",
+        text: "hello",
+        chatJid: "user@s.whatsapp.net",
+        senderJid: "user@s.whatsapp.net"
+      })
+    );
+
+    await waitFor(() => {
+      expect(transport.sent).toHaveLength(2);
+    });
+
+    expect(transport.sent.map((message) => message.text)).toEqual([
+      "[Maya] first bubble",
+      "[Maya] second bubble"
+    ]);
+  });
+
 });

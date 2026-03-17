@@ -50,6 +50,7 @@ export interface BotFileConfig {
   botId: string;
   triggerNames: string[];
   admins: string[];
+  messagePrefix?: string;
   replyWhitelist?: BotReplyWhitelist;
   blockSize?: number;
   bubbleDelayMs?: [number, number];
@@ -62,6 +63,7 @@ export interface ResolvedBotConfig {
   botId: string;
   triggerNames: string[];
   admins: string[];
+  messagePrefix: string;
   replyWhitelist: ResolvedReplyWhitelist;
   blockSize: number;
   bubbleDelayMs: [number, number];

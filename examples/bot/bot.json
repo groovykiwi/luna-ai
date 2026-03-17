@@ -2,6 +2,7 @@
   "botId": "example-bot",
   "triggerNames": ["maya"],
   "admins": [],
+  "messagePrefix": "",
   "replyWhitelist": {
     "dms": [],
     "groups": []

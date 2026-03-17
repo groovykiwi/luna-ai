@@ -17,6 +17,7 @@ const BotConfigSchema = z.object({
   botId: z.string().min(1),
   triggerNames: z.array(z.string().min(1)).default([]),
   admins: z.array(z.string().min(1)).default([]),
+  messagePrefix: z.string().optional(),
   replyWhitelist: z
     .object({
       dms: z.array(z.string().min(1)).optional(),
@@ -112,6 +113,7 @@ function resolveBotConfig(rawConfig: BotFileConfig): ResolvedBotConfig {
     botId: rawConfig.botId,
     triggerNames: rawConfig.triggerNames.map((value) => value.trim()).filter(Boolean),
     admins: [...new Set(rawConfig.admins)],
+    messagePrefix: rawConfig.messagePrefix ?? "",
     replyWhitelist: resolveReplyWhitelist(rawConfig.replyWhitelist),
     blockSize: rawConfig.blockSize ?? rootConfig.defaultBlockSize,
     bubbleDelayMs,

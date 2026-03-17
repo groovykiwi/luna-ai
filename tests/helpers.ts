@@ -55,6 +55,7 @@ export function createRuntimeContext(root: string): RuntimeContext {
       botId: "maya",
       triggerNames: ["maya"],
       admins: ["admin@s.whatsapp.net"],
+      messagePrefix: "",
       replyWhitelist: {
         dms: null,
         groups: null
