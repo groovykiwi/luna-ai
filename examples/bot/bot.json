@@ -1,0 +1,19 @@
+{
+  "botId": "example-bot",
+  "triggerNames": ["maya"],
+  "admins": [],
+  "replyWhitelist": {
+    "dms": [],
+    "groups": []
+  },
+  "blockSize": 50,
+  "bubbleDelayMs": [150, 400],
+  "retrievalMinHits": 3,
+  "models": {
+    "main": "google/gemini-3-flash-preview:nitro",
+    "extract": "openai/gpt-4o-mini",
+    "vision": "openai/gpt-4o-mini",
+    "embed": "openai/text-embedding-3-small"
+  },
+  "retainProcessedMedia": false
+}

@@ -1,0 +1,11 @@
+services:
+  tinyclaw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      BOT_PATH: /bot
+    volumes:
+      - ${BOT_HOST_PATH}:/bot
+    restart: unless-stopped
