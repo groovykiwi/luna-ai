@@ -1,10 +1,14 @@
-<h1 align="center">Luna AI</h1>
-<p align="center">Personality-first WhatsApp bots with durable memory.</p>
 <p align="center">
   <img src="assets/readme/hero.jpg" alt="Luna AI hero" width="100%">
 </p>
 
-<p align="center">
+# Luna AI
+
+Personality-first WhatsApp bots with durable memory.
+
+---
+
+<p>
   <img alt="Node 22" src="https://img.shields.io/badge/Node-22-111827?style=flat-square&logo=node.js&logoColor=8cc84b">
   <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5-111827?style=flat-square&logo=typescript&logoColor=3178c6">
   <img alt="Baileys" src="https://img.shields.io/badge/WhatsApp-Baileys-111827?style=flat-square">
