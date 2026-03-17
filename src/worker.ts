@@ -1,7 +1,7 @@
 import { unlinkSync } from "node:fs";
 
 import type { RuntimeContext } from "./domain.js";
-import type { TinyClawDb } from "./db.js";
+import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import type { Logger } from "./logging.js";
 import { MemoryService } from "./memory.js";
@@ -14,7 +14,7 @@ export class BackgroundWorker {
 
   constructor(
     private readonly runtimeContext: RuntimeContext,
-    private readonly db: TinyClawDb,
+    private readonly db: LunaDb,
     private readonly gateway: LanguageGateway,
     private readonly logger: Logger
   ) {

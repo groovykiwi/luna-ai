@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ChatRuntime } from "../src/chat/runtime.js";
-import { TinyClawDb } from "../src/db.js";
+import { LunaDb } from "../src/db.js";
 import { createLogger } from "../src/logging.js";
 import {
   cleanupTempRoot,
@@ -28,7 +28,7 @@ describe("reply allowlist", () => {
     const runtimeContext = createRuntimeContext(root);
     runtimeContext.botConfig.replyWhitelist.dms = ["allowed@s.whatsapp.net"];
 
-    const db = new TinyClawDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
     const gateway = new FakeGateway();
     const transport = new MockTransport();
     const logger = createLogger(`${runtimeContext.paths.logsDir}/reply-whitelist-dm.log`, "reply-whitelist-dm");
@@ -65,7 +65,7 @@ describe("reply allowlist", () => {
     const runtimeContext = createRuntimeContext(root);
     runtimeContext.botConfig.replyWhitelist.groups = ["allowed@g.us"];
 
-    const db = new TinyClawDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
     const gateway = new FakeGateway();
     const transport = new MockTransport();
     const logger = createLogger(`${runtimeContext.paths.logsDir}/reply-whitelist-group.log`, "reply-whitelist-group");

@@ -81,7 +81,7 @@ interface RawStoredMessageRow {
 
 const SCHEMA_VERSION = "1";
 
-export class TinyClawDb {
+export class LunaDb {
   readonly connection: Database.Database;
 
   constructor(dbPath: string, busyTimeoutMs: number) {

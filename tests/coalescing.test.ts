@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { ChatRuntime } from "../src/chat/runtime.js";
-import { TinyClawDb } from "../src/db.js";
+import { LunaDb } from "../src/db.js";
 import { createLogger } from "../src/logging.js";
 import {
   cleanupTempRoot,
@@ -26,7 +26,7 @@ describe("turn coalescing", () => {
     const root = createTempRoot();
     roots.push(root);
     const runtimeContext = createRuntimeContext(root);
-    const db = new TinyClawDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
     const gateway = new FakeGateway();
     const transport = new MockTransport();
     const logger = createLogger(`${runtimeContext.paths.logsDir}/chat-test.log`, "chat-test");
@@ -71,7 +71,7 @@ describe("turn coalescing", () => {
     const root = createTempRoot();
     roots.push(root);
     const runtimeContext = createRuntimeContext(root);
-    const db = new TinyClawDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
     const gateway = new FakeGateway();
     const transport = new MockTransport();
     const logger = createLogger(`${runtimeContext.paths.logsDir}/chat-context-test.log`, "chat-context-test");

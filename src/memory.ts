@@ -1,6 +1,6 @@
 import { encodeEmbedding } from "./db.js";
 import type { ArchiveHit, ExtractedMemory, MemoryOperation, RetrievedMemory } from "./domain.js";
-import type { TinyClawDb } from "./db.js";
+import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import { rootConfig } from "./config.js";
 
@@ -28,7 +28,7 @@ function buildArchiveQuery(input: string): string | null {
 
 export class MemoryService {
   constructor(
-    private readonly db: TinyClawDb,
+    private readonly db: LunaDb,
     private readonly gateway: LanguageGateway,
     private readonly retrievalMinHits: number
   ) {}

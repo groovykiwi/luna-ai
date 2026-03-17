@@ -8,12 +8,12 @@ import type {
   RuntimeContext,
   StoredMessage
 } from "../src/domain.js";
-import { TinyClawDb } from "../src/db.js";
+import { LunaDb } from "../src/db.js";
 import type { LanguageGateway } from "../src/llm.js";
 import type { ChatPresenceState, ChatTransport, SendResult } from "../src/transport.js";
 
 export function createTempRoot(): string {
-  return mkdtempSync(path.join(tmpdir(), "tinyclaw-"));
+  return mkdtempSync(path.join(tmpdir(), "luna-ai-"));
 }
 
 export function cleanupTempRoot(root: string): void {
@@ -83,9 +83,9 @@ export function createRuntimeContext(root: string): RuntimeContext {
   };
 }
 
-export function createDb(root: string): TinyClawDb {
+export function createDb(root: string): LunaDb {
   const runtime = createRuntimeContext(root);
-  return new TinyClawDb(runtime.paths.dbPath, runtime.rootConfig.busyTimeoutMs);
+  return new LunaDb(runtime.paths.dbPath, runtime.rootConfig.busyTimeoutMs);
 }
 
 export class FakeGateway implements LanguageGateway {

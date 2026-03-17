@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { loadEnvironment } from "../config.js";
-import { TinyClawDb } from "../db.js";
+import { LunaDb } from "../db.js";
 import { OpenRouterGateway } from "../llm.js";
 import { createLogger } from "../logging.js";
 import { loadRuntimeContext } from "../runtime.js";
@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(path.join(runtimeContext.paths.logsDir, "worker.log"), "worker");
-  const db = new TinyClawDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+  const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
   const gateway = new OpenRouterGateway(
     environment.openRouterApiKey,
     runtimeContext.rootConfig.openRouterBaseUrl,

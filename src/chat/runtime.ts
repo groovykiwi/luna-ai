@@ -1,6 +1,6 @@
 import type { Logger } from "../logging.js";
 import type { RuntimeContext } from "../domain.js";
-import type { TinyClawDb } from "../db.js";
+import type { LunaDb } from "../db.js";
 import type { LanguageGateway } from "../llm.js";
 import type { ChatTransport } from "../transport.js";
 import { persistInboundImage } from "../media.js";
@@ -25,7 +25,7 @@ export class ChatRuntime {
 
   constructor(
     private readonly runtimeContext: RuntimeContext,
-    private readonly db: TinyClawDb,
+    private readonly db: LunaDb,
     private readonly transport: ChatTransport,
     private readonly gateway: LanguageGateway,
     private readonly logger: Logger

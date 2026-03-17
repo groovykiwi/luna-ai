@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { BaileysTransport } from "../baileys.js";
 import { loadEnvironment } from "../config.js";
-import { TinyClawDb } from "../db.js";
+import { LunaDb } from "../db.js";
 import { OpenRouterGateway } from "../llm.js";
 import { createLogger } from "../logging.js";
 import { loadRuntimeContext } from "../runtime.js";
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(path.join(runtimeContext.paths.logsDir, "chat.log"), "chat");
-  const db = new TinyClawDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+  const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
   const gateway = new OpenRouterGateway(
     environment.openRouterApiKey,
     runtimeContext.rootConfig.openRouterBaseUrl,

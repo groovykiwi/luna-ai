@@ -1,5 +1,5 @@
 import type { RuntimeContext, StoredMessage } from "./domain.js";
-import type { TinyClawDb } from "./db.js";
+import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import { formatArchiveHits, formatRetrievedMemories, MemoryService } from "./memory.js";
 import { chunkText } from "./utils.js";
@@ -48,7 +48,7 @@ export function splitReplyIntoBubbles(text: string): string[] {
 
 export class ReplyService {
   constructor(
-    private readonly db: TinyClawDb,
+    private readonly db: LunaDb,
     private readonly gateway: LanguageGateway,
     private readonly memoryService: MemoryService,
     private readonly runtimeContext: RuntimeContext
