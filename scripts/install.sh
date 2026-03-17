@@ -3,7 +3,7 @@
 set -euo pipefail
 
 TTY="/dev/tty"
-REPO_URL="${LUNA_REPO_URL:-https://github.com/groovykiwi/luna.git}"
+REPO_URL="${LUNA_REPO_URL:-https://github.com/groovykiwi/luna-ai.git}"
 REPO_REF="${LUNA_REF:-main}"
 
 if [[ ! -r "$TTY" ]]; then
@@ -66,9 +66,9 @@ confirm_yes_no() {
 
 require_command git
 
-printf 'Luna installer\n'
+printf 'Luna AI installer\n'
 
-INSTALL_DIR="$(prompt_with_default "Install directory" "./luna")"
+INSTALL_DIR="$(prompt_with_default "Install directory" "./luna-ai")"
 BOT_ID="$(prompt_with_default "Bot ID" "maya")"
 OPENROUTER_API_KEY="$(prompt_required_secret "OpenRouter API key")"
 
@@ -99,7 +99,7 @@ printf 'Edit config: %s\n' "bots/$BOT_ID/bot.json"
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   if confirm_yes_no "Start Luna with docker compose now?" "y"; then
     docker compose up -d --build
-    printf '\nLuna is starting.\n'
+    printf '\nLuna AI is starting.\n'
     printf 'Watch logs with: docker compose logs -f\n'
     exit 0
   fi
