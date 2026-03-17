@@ -1,6 +1,6 @@
-# TinyClaw
+# Luna
 
-TinyClaw is a minimal, production-grade WhatsApp bot framework built around two things only: personality and memory.
+Luna is a minimal, production-grade WhatsApp bot framework built around two things only: personality and memory.
 
 This repo is meant to be pushed as a clean code template. Actual bot state stays local to each deployment:
 
@@ -16,14 +16,35 @@ That state lives under `bots/<bot-id>/` on the machine running the bot and is in
 
 Use a normal GitHub repository or GitHub template repo.
 
-That is the right first step. It is simpler and safer than a `curl | bash` installer:
+That is still the right source-of-truth model. The installer below is only a convenience layer on top:
 
 - the code is visible before you run it
 - updates are just `git pull`
 - the deployment is reproducible
 - your VPS setup can stay very small: clone, create one bot folder, fill `.env`, start Docker
 
-If you want a one-command installer later, build it on top of this repo after the template flow feels stable.
+## One-Line Installer
+
+Once this repo is pushed to GitHub, you can install it on a VPS with:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/groovykiwi/luna/main/scripts/install.sh | bash
+```
+
+The installer will prompt for:
+
+- install directory
+- bot ID
+- `OPENROUTER_API_KEY`
+- whether to start Docker immediately
+
+It then:
+
+- clones the repo
+- creates `.env`
+- creates `bots/<bot-id>/`
+- initializes `persona.md` and `bot.json`
+- optionally runs `docker compose up -d --build`
 
 ## Fresh VPS Setup
 
@@ -37,8 +58,8 @@ If you want a one-command installer later, build it on top of this repo after th
 Example:
 
 ```bash
-git clone <your-repo-url> tinyclaw
-cd tinyclaw
+git clone <your-repo-url> luna
+cd luna
 cp .env.example .env
 ./scripts/init-bot.sh maya
 ```
