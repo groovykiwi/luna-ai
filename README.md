@@ -3,10 +3,7 @@
 </p>
 
 # Luna AI
-
 Personality-first WhatsApp bots with durable memory.
-
----
 
 <p>
   <img alt="Node 22" src="https://img.shields.io/badge/Node-22-111827?style=flat-square&logo=node.js&logoColor=8cc84b">
@@ -34,8 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/groovykiwi/luna-ai/main/scripts/ins
 
 The installer clones the repo, prompts for the bot ID and `OPENROUTER_API_KEY`, writes `.env`, initializes `bots/<bot-id>/`, and can start Docker immediately.
 
-If the repo is private:
-
+Alternatively:
 ```bash
 git clone git@github.com:groovykiwi/luna-ai.git
 cd luna-ai
