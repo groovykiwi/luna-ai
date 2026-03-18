@@ -119,4 +119,23 @@ describe("whatsapp ids cli", () => {
       cleanupTempRoot(root);
     }
   });
+
+  it("handles a missing database file without crashing", () => {
+    const root = createTempRoot();
+    const runtimeContext = createRuntimeContext(root);
+
+    try {
+      const stdout = createCapturedStdout();
+      runWhatsAppIdsCli({
+        stdout: stdout.stream,
+        loadRuntimeContext: () => runtimeContext
+      });
+
+      const output = stdout.read();
+      expect(output).toContain("No WhatsApp chats found yet.");
+      expect(output).toContain("Send the bot a WhatsApp DM or mention it in a group first");
+    } finally {
+      cleanupTempRoot(root);
+    }
+  });
 });

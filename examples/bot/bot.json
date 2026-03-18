@@ -1,7 +1,7 @@
 {
-  "botId": "example-bot",
+  "botId": "{{BOT_ID}}",
   "provider": "whatsapp",
-  "triggerNames": ["example-bot"],
+  "triggerNames": ["{{BOT_ID}}"],
   "messagePrefix": "",
   "heartbeat": {
     "intervalMs": 3600000,
@@ -11,7 +11,7 @@
   "bubbleDelayMs": [150, 400],
   "retrievalMinHits": 3,
   "models": {
-    "main": "google/gemini-3-flash-preview:nitro",
+    "main": "anthropic/claude-sonnet-4.6",
     "extract": "openai/gpt-4o-mini",
     "vision": "openai/gpt-4o-mini",
     "embed": "openai/text-embedding-3-small"

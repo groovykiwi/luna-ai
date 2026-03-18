@@ -14,6 +14,31 @@ has_interactive_tty() {
   [[ -t 0 || -t 1 || -t 2 ]] && [[ -r "$TTY" ]]
 }
 
+local_cli_ready() {
+  [[ -x "$REPO_ROOT/node_modules/.bin/tsx" ]]
+}
+
+ensure_local_cli_ready() {
+  if local_cli_ready; then
+    return
+  fi
+
+  if ! command -v pnpm >/dev/null 2>&1; then
+    echo "Local pnpm dependencies are not installed and pnpm is unavailable." >&2
+    echo "Install pnpm locally or run auth setup with Docker Compose available." >&2
+    exit 1
+  fi
+
+  printf 'Bootstrapping local pnpm dependencies for auth setup...\n'
+  pnpm install --frozen-lockfile
+  pnpm approve-builds --all
+
+  if ! local_cli_ready; then
+    echo "Local auth setup is still unavailable after pnpm install." >&2
+    exit 1
+  fi
+}
+
 confirm_yes_no() {
   local prompt="$1"
   local default_answer="${2:-y}"
@@ -288,6 +313,7 @@ choose_provider_interactively() {
 
 run_local_auth() {
   local provider="$1"
+  ensure_local_cli_ready
   if [[ "$provider" == "telegram" ]]; then
     ensure_telegram_token
   fi

@@ -18,7 +18,7 @@ describe("init-bot.sh", () => {
     }
   });
 
-  it("uses the provided bot id for the scaffold botId and trigger name", () => {
+  it("uses the provided bot id across the scaffolded bot files", () => {
     const root = createTempRoot();
     tempRoots.push(root);
 
@@ -35,8 +35,10 @@ describe("init-bot.sh", () => {
       botId: string;
       triggerNames: string[];
     };
+    const persona = readFileSync(path.join(targetDir, "persona.md"), "utf8");
 
     expect(botConfig.botId).toBe(botId);
     expect(botConfig.triggerNames).toEqual([botId]);
+    expect(persona).toContain("You are orchid.");
   });
 });

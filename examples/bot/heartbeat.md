@@ -13,4 +13,4 @@ Reply when:
 - someone is obviously waiting for your take even if they did not explicitly trigger you
 - the vibe clearly invites you in
 
-If you reply, keep it natural for WhatsApp and consistent with your persona.
+If you reply, keep it natural for chat and consistent with your persona.

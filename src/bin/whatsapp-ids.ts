@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import type { RuntimeContext } from "../domain.js";
@@ -53,6 +54,14 @@ function parseArgs(argv: string[]): { help: boolean } {
 }
 
 export function listWhatsAppIds(dbPath: string): WhatsAppIdsResult {
+  if (!existsSync(dbPath)) {
+    return {
+      dms: [],
+      groups: [],
+      users: []
+    };
+  }
+
   const database = new Database(dbPath, { readonly: true });
 
   try {
