@@ -21,6 +21,7 @@ Luna AI is a minimal production-grade framework for running WhatsApp bots that f
 - Baileys-based WhatsApp transport with QR login and persistent sessions
 - Shared long-term memory with embeddings and FTS fallback
 - DM and group reply whitelists
+- Optional heartbeat-driven ambient check-ins with fixed or random intervals
 - Docker deployment with one chat process and one background worker
 
 ## Install
@@ -57,3 +58,33 @@ pnpm chat
 - Runtime state lives in `bots/<bot-id>/`
 - For a fresh VPS, do not copy `bot.db`, `media/`, or `logs/`
 - Copy `auth/` only if you want to keep the existing WhatsApp login
+
+## Heartbeats
+
+Heartbeats let the bot periodically review ambient chat and decide whether it wants to jump in, even when nobody explicitly triggered it.
+
+The prompt for that behavior lives in `heartbeat.md` inside the bot folder. The scaffold now creates that file automatically.
+
+Enable heartbeats in `bot.json` with either a fixed interval:
+
+```json
+{
+  "heartbeat": {
+    "intervalMs": 300000,
+    "batchSize": 8
+  }
+}
+```
+
+Or a random interval:
+
+```json
+{
+  "heartbeat": {
+    "randomIntervalMs": [180000, 420000],
+    "batchSize": 8
+  }
+}
+```
+
+Only one of `intervalMs` or `randomIntervalMs` may be set at a time.

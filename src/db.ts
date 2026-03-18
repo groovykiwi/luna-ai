@@ -79,7 +79,7 @@ interface RawStoredMessageRow {
   processedTurnAt: string | null;
 }
 
-const SCHEMA_VERSION = "1";
+const SCHEMA_VERSION = "2";
 
 export class LunaDb {
   readonly connection: Database.Database;
@@ -110,9 +110,11 @@ export class LunaDb {
         type TEXT NOT NULL CHECK(type IN ('dm', 'group')),
         title TEXT,
         last_active_at TEXT NOT NULL,
+        last_reviewed_message_id INTEGER,
         last_completed_bot_message_id INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        FOREIGN KEY(last_reviewed_message_id) REFERENCES messages(id),
         FOREIGN KEY(last_completed_bot_message_id) REFERENCES messages(id)
       );
 
@@ -236,6 +238,10 @@ export class LunaDb {
       END;
     `);
 
+    if (!this.hasColumn("chats", "last_reviewed_message_id")) {
+      this.connection.exec("ALTER TABLE chats ADD COLUMN last_reviewed_message_id INTEGER REFERENCES messages(id)");
+    }
+
     const now = new Date().toISOString();
     this.connection
       .prepare(
@@ -244,6 +250,11 @@ export class LunaDb {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
       )
       .run(SCHEMA_VERSION, now);
+  }
+
+  private hasColumn(tableName: string, columnName: string): boolean {
+    const columns = this.connection.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+    return columns.some((column) => column.name === columnName);
   }
 
   private getOrCreateChat(chatJid: string, chatType: ChatType, createdAt: string): { id: number } {
@@ -564,6 +575,30 @@ export class LunaDb {
     return rows.map((row) => row.chatId);
   }
 
+  listChatsWithHeartbeatBacklog(): number[] {
+    const rows = this.connection
+      .prepare(
+        `SELECT m.chat_id AS chatId, MIN(m.id) AS firstUnreviewedId
+         FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+         WHERE m.is_from_bot = 0
+           AND m.id > COALESCE(c.last_reviewed_message_id, 0)
+           AND NOT EXISTS (
+             SELECT 1
+             FROM messages pending
+             WHERE pending.chat_id = m.chat_id
+               AND pending.is_from_bot = 0
+               AND pending.turn_eligible = 1
+               AND pending.processed_turn_at IS NULL
+           )
+         GROUP BY m.chat_id
+         ORDER BY firstUnreviewedId ASC`
+      )
+      .all() as Array<{ chatId: number }>;
+
+    return rows.map((row) => row.chatId);
+  }
+
   private mapStoredMessageRow(row: RawStoredMessageRow): StoredMessage {
     return {
       id: row.id,
@@ -620,6 +655,41 @@ export class LunaDb {
     return rows.map((row) => this.mapStoredMessageRow(row));
   }
 
+  getHeartbeatReviewMessages(chatId: number, limit: number): StoredMessage[] {
+    const rows = this.connection
+      .prepare(
+        `SELECT
+           id,
+           chat_id AS chatId,
+           block_id AS blockId,
+           external_id AS externalId,
+           sender_jid AS senderJid,
+           sender_name AS senderName,
+           is_from_bot AS isFromBot,
+           chat_type AS chatType,
+           context_only AS contextOnly,
+           memory_eligible AS memoryEligible,
+           was_triggered AS wasTriggered,
+           turn_eligible AS turnEligible,
+           content_type AS contentType,
+           text,
+           image_description AS imageDescription,
+           quoted_external_id AS quotedExternalId,
+           mentions_json AS mentionsJson,
+           created_at AS createdAt,
+           processed_turn_at AS processedTurnAt
+         FROM messages
+         WHERE chat_id = ?
+           AND is_from_bot = 0
+           AND id > COALESCE((SELECT last_reviewed_message_id FROM chats WHERE id = ?), 0)
+         ORDER BY id ASC
+         LIMIT ?`
+      )
+      .all(chatId, chatId, limit) as RawStoredMessageRow[];
+
+    return rows.map((row) => this.mapStoredMessageRow(row));
+  }
+
   markTurnMessagesProcessed(messageIds: number[], now: string): void {
     if (messageIds.length === 0) {
       return;
@@ -629,6 +699,20 @@ export class LunaDb {
     this.connection
       .prepare(`UPDATE messages SET processed_turn_at = ? WHERE id IN (${placeholders})`)
       .run(now, ...messageIds);
+  }
+
+  markChatReviewedThrough(chatId: number, messageId: number, now: string): void {
+    this.connection
+      .prepare(
+        `UPDATE chats
+         SET last_reviewed_message_id = CASE
+               WHEN COALESCE(last_reviewed_message_id, 0) > ? THEN last_reviewed_message_id
+               ELSE ?
+             END,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .run(messageId, messageId, now, chatId);
   }
 
   getRecentWindow(chatId: number): StoredMessage[] {

@@ -1,6 +1,8 @@
+import type { ChatType } from "../domain.js";
 import type { Logger } from "../logging.js";
 import type { RuntimeContext } from "../domain.js";
 import type { LunaDb } from "../db.js";
+import { HeartbeatService } from "../heartbeat.js";
 import type { LanguageGateway } from "../llm.js";
 import type { ChatTransport } from "../transport.js";
 import { persistInboundImage } from "../media.js";
@@ -17,11 +19,19 @@ export class ChatRuntime {
 
   private readonly replyService: ReplyService;
 
+  private readonly heartbeatService: HeartbeatService;
+
   private readonly queue: TurnQueue;
 
   private botJid = "";
 
   private botIdentityJids: string[] = [];
+
+  private heartbeatTimer: NodeJS.Timeout | null = null;
+
+  private heartbeatRunning = false;
+
+  private stopping = false;
 
   constructor(
     private readonly runtimeContext: RuntimeContext,
@@ -32,6 +42,7 @@ export class ChatRuntime {
   ) {
     this.memoryService = new MemoryService(db, gateway, runtimeContext.botConfig.retrievalMinHits);
     this.replyService = new ReplyService(db, gateway, this.memoryService, runtimeContext);
+    this.heartbeatService = new HeartbeatService(db, gateway, this.memoryService, runtimeContext);
     this.queue = new TurnQueue(async (chatId) => this.processTurn(chatId));
   }
 
@@ -51,9 +62,16 @@ export class ChatRuntime {
     for (const chatId of this.db.listChatsWithPendingTurns()) {
       this.queue.enqueue(chatId);
     }
+
+    this.scheduleNextHeartbeat();
   }
 
   async stop(): Promise<void> {
+    this.stopping = true;
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     await this.transport.stop();
   }
 
@@ -145,6 +163,10 @@ export class ChatRuntime {
       blockClosed: result.blockClosed
     });
 
+    if (!replyAllowed) {
+      this.db.markChatReviewedThrough(result.chatId, result.messageId, message.timestamp);
+    }
+
     if (replyAllowed && trigger.triggered) {
       this.queue.enqueue(result.chatId);
     }
@@ -163,6 +185,7 @@ export class ChatRuntime {
     }
 
     if (!this.isReplyAllowed(chat.jid, chat.type)) {
+      const reviewedAt = new Date().toISOString();
       this.logger.info("skipping pending turn for non-allowlisted chat", {
         chatId,
         chatJid: chat.jid,
@@ -170,8 +193,12 @@ export class ChatRuntime {
       });
       this.db.markTurnMessagesProcessed(
         pendingMessages.map((message) => message.id),
-        new Date().toISOString()
+        reviewedAt
       );
+      const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
+      if (lastPendingMessage) {
+        this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, reviewedAt);
+      }
       return this.db.getPendingTurnMessages(chatId).length > 0;
     }
 
@@ -179,12 +206,15 @@ export class ChatRuntime {
       const generationStartedAt = Date.now();
       const generated = await this.replyService.generateForTurn(chatId, pendingMessages);
       const generationMs = Date.now() - generationStartedAt;
-      const bubbles = splitReplyIntoBubbles(generated.reply);
-      if (bubbles.length === 0) {
+      const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
+      if (splitReplyIntoBubbles(generated.reply).length === 0) {
         this.db.markTurnMessagesProcessed(
           pendingMessages.map((message) => message.id),
           generated.memoryAppliedAt
         );
+        if (lastPendingMessage) {
+          this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, generated.memoryAppliedAt);
+        }
         this.logger.info("completed turn without outbound bubbles", {
           chatId,
           pendingMessageCount: pendingMessages.length,
@@ -194,48 +224,136 @@ export class ChatRuntime {
         return this.db.getPendingTurnMessages(chatId).length > 0;
       }
 
-      const sendStartedAt = Date.now();
-      for (let index = 0; index < bubbles.length; index += 1) {
-        const bubble = bubbles[index];
-        if (!bubble) {
-          continue;
-        }
-
-        const outboundText = this.applyMessagePrefix(bubble);
-        const sent = await this.transport.sendText(chat.jid, outboundText);
-        this.db.createBotMessage(
-          chat.jid,
-          chat.type,
-          this.botJid,
-          sent.externalId,
-          outboundText,
-          sent.timestamp,
-          this.runtimeContext.botConfig.blockSize
-        );
-
-        const isLastBubble = index === bubbles.length - 1;
-        if (!isLastBubble) {
-          const [minDelay, maxDelay] = this.runtimeContext.botConfig.bubbleDelayMs;
-          await sleep(randomIntInclusive(minDelay, maxDelay));
-        }
-      }
+      const sent = await this.sendReply(chat.jid, chat.type, generated.reply);
+      const completedAt = new Date().toISOString();
 
       this.db.markTurnMessagesProcessed(
         pendingMessages.map((message) => message.id),
-        new Date().toISOString()
+        completedAt
       );
+      if (lastPendingMessage) {
+        this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, completedAt);
+      }
 
       this.logger.info("completed turn", {
         chatId,
         pendingMessageCount: pendingMessages.length,
-        bubbleCount: bubbles.length,
+        bubbleCount: sent.bubbleCount,
         generationMs,
-        sendMs: Date.now() - sendStartedAt,
+        sendMs: sent.sendMs,
         totalMs: Date.now() - turnStartedAt
       });
 
       return this.db.getPendingTurnMessages(chatId).length > 0;
     });
+  }
+
+  private scheduleNextHeartbeat(): void {
+    if (this.stopping || !this.runtimeContext.botConfig.heartbeat.enabled) {
+      return;
+    }
+
+    const delayMs = this.getNextHeartbeatDelayMs();
+    this.heartbeatTimer = setTimeout(() => {
+      this.heartbeatTimer = null;
+      void this.runHeartbeatCycle();
+    }, delayMs);
+    this.heartbeatTimer.unref?.();
+  }
+
+  private getNextHeartbeatDelayMs(): number {
+    const heartbeat = this.runtimeContext.botConfig.heartbeat;
+    if (heartbeat.randomIntervalMs) {
+      return randomIntInclusive(heartbeat.randomIntervalMs[0], heartbeat.randomIntervalMs[1]);
+    }
+
+    return heartbeat.intervalMs ?? 0;
+  }
+
+  private async runHeartbeatCycle(): Promise<void> {
+    if (this.heartbeatRunning || this.stopping || !this.runtimeContext.botConfig.heartbeat.enabled) {
+      return;
+    }
+
+    this.heartbeatRunning = true;
+    try {
+      await this.processHeartbeatBacklog();
+    } catch (error) {
+      this.logger.error("heartbeat cycle failed", {
+        error: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      this.heartbeatRunning = false;
+      this.scheduleNextHeartbeat();
+    }
+  }
+
+  private async processHeartbeatBacklog(): Promise<void> {
+    const candidateChatIds = this.db.listChatsWithHeartbeatBacklog();
+    if (candidateChatIds.length === 0) {
+      return;
+    }
+
+    for (const chatId of candidateChatIds) {
+      if (this.stopping) {
+        return;
+      }
+
+      const chat = this.db.getChatById(chatId);
+      if (!chat) {
+        continue;
+      }
+
+      const reviewMessages = this.db.getHeartbeatReviewMessages(chatId, this.runtimeContext.botConfig.heartbeat.batchSize);
+      const lastReviewMessage = reviewMessages[reviewMessages.length - 1];
+      if (reviewMessages.length === 0 || !lastReviewMessage) {
+        continue;
+      }
+
+      if (!this.isReplyAllowed(chat.jid, chat.type)) {
+        this.db.markChatReviewedThrough(chatId, lastReviewMessage.id, new Date().toISOString());
+        continue;
+      }
+
+      if (this.db.getPendingTurnMessages(chatId).length > 0) {
+        continue;
+      }
+
+      const decisionStartedAt = Date.now();
+      const generated = await this.heartbeatService.generateForReview(chatId, reviewMessages);
+      const decisionMs = Date.now() - decisionStartedAt;
+
+      if (!generated.shouldReply) {
+        this.db.markChatReviewedThrough(chatId, lastReviewMessage.id, generated.memoryAppliedAt);
+        this.logger.info("heartbeat stayed silent", {
+          chatId,
+          chatJid: chat.jid,
+          chatType: chat.type,
+          reviewedMessageCount: reviewMessages.length,
+          decisionMs
+        });
+        continue;
+      }
+
+      if (this.db.getPendingTurnMessages(chatId).length > 0) {
+        this.db.markChatReviewedThrough(chatId, lastReviewMessage.id, generated.memoryAppliedAt);
+        continue;
+      }
+
+      const sent = await this.runWithTypingPresence(chat.jid, async () => this.sendReply(chat.jid, chat.type, generated.reply));
+      const completedAt = new Date().toISOString();
+      this.db.markChatReviewedThrough(chatId, lastReviewMessage.id, completedAt);
+
+      this.logger.info("heartbeat replied", {
+        chatId,
+        chatJid: chat.jid,
+        chatType: chat.type,
+        reviewedMessageCount: reviewMessages.length,
+        bubbleCount: sent.bubbleCount,
+        decisionMs,
+        sendMs: sent.sendMs
+      });
+    }
   }
 
   private async runWithTypingPresence<T>(chatJid: string, action: () => Promise<T>): Promise<T> {
@@ -267,5 +385,40 @@ export class ChatRuntime {
   private applyMessagePrefix(text: string): string {
     const prefix = this.runtimeContext.botConfig.messagePrefix;
     return prefix ? `${prefix}${text}` : text;
+  }
+
+  private async sendReply(chatJid: string, chatType: ChatType, reply: string): Promise<{ bubbleCount: number; sendMs: number }> {
+    const bubbles = splitReplyIntoBubbles(reply);
+    const sendStartedAt = Date.now();
+
+    for (let index = 0; index < bubbles.length; index += 1) {
+      const bubble = bubbles[index];
+      if (!bubble) {
+        continue;
+      }
+
+      const outboundText = this.applyMessagePrefix(bubble);
+      const sent = await this.transport.sendText(chatJid, outboundText);
+      this.db.createBotMessage(
+        chatJid,
+        chatType,
+        this.botJid,
+        sent.externalId,
+        outboundText,
+        sent.timestamp,
+        this.runtimeContext.botConfig.blockSize
+      );
+
+      const isLastBubble = index === bubbles.length - 1;
+      if (!isLastBubble) {
+        const [minDelay, maxDelay] = this.runtimeContext.botConfig.bubbleDelayMs;
+        await sleep(randomIntInclusive(minDelay, maxDelay));
+      }
+    }
+
+    return {
+      bubbleCount: bubbles.length,
+      sendMs: Date.now() - sendStartedAt
+    };
   }
 }

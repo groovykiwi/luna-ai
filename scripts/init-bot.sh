@@ -26,6 +26,7 @@ fi
 mkdir -p "$TARGET_PATH"
 cp "$REPO_ROOT/examples/bot/persona.md" "$TARGET_PATH/persona.md"
 cp "$REPO_ROOT/examples/bot/bot.json" "$TARGET_PATH/bot.json"
+cp "$REPO_ROOT/examples/bot/heartbeat.md" "$TARGET_PATH/heartbeat.md"
 mkdir -p "$TARGET_PATH/auth" "$TARGET_PATH/media" "$TARGET_PATH/logs"
 
 node --input-type=module -e '

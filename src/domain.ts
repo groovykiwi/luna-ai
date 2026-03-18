@@ -24,9 +24,22 @@ export interface BotReplyWhitelist {
   groups?: string[];
 }
 
+export interface BotHeartbeatConfig {
+  intervalMs?: number;
+  randomIntervalMs?: [number, number];
+  batchSize?: number;
+}
+
 export interface ResolvedReplyWhitelist {
   dms: string[] | null;
   groups: string[] | null;
+}
+
+export interface ResolvedHeartbeatConfig {
+  enabled: boolean;
+  intervalMs: number | null;
+  randomIntervalMs: [number, number] | null;
+  batchSize: number;
 }
 
 export interface RootConfig {
@@ -35,6 +48,7 @@ export interface RootConfig {
   defaultBlockSize: number;
   defaultBubbleDelayMs: readonly [number, number];
   defaultRetrievalMinHits: number;
+  defaultHeartbeatBatchSize: number;
   memorySearchLimit: number;
   rawArchiveSearchLimit: number;
   recentWindowBlockLimit: number;
@@ -52,6 +66,7 @@ export interface BotFileConfig {
   admins: string[];
   messagePrefix?: string;
   replyWhitelist?: BotReplyWhitelist;
+  heartbeat?: BotHeartbeatConfig;
   blockSize?: number;
   bubbleDelayMs?: [number, number];
   retrievalMinHits?: number;
@@ -65,6 +80,7 @@ export interface ResolvedBotConfig {
   admins: string[];
   messagePrefix: string;
   replyWhitelist: ResolvedReplyWhitelist;
+  heartbeat: ResolvedHeartbeatConfig;
   blockSize: number;
   bubbleDelayMs: [number, number];
   retrievalMinHits: number;
@@ -76,6 +92,7 @@ export interface RuntimePaths {
   botPath: string;
   personaPath: string;
   botConfigPath: string;
+  heartbeatPath: string;
   dbPath: string;
   authDir: string;
   mediaDir: string;
@@ -86,6 +103,7 @@ export interface RuntimeContext {
   rootConfig: RootConfig;
   botConfig: ResolvedBotConfig;
   persona: string;
+  heartbeatInstructions: string | null;
   paths: RuntimePaths;
 }
 
@@ -180,6 +198,12 @@ export interface ExtractionCandidate {
 }
 
 export interface GeneratedReply {
+  reply: string;
+  memoryOperations: MemoryOperation[];
+}
+
+export interface GeneratedHeartbeatDecision {
+  shouldReply: boolean;
   reply: string;
   memoryOperations: MemoryOperation[];
 }

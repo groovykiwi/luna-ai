@@ -5,13 +5,38 @@ import { z } from "zod";
 
 import { loadEnvironment, rootConfig } from "./config.js";
 import type {
+  BotHeartbeatConfig,
   BotFileConfig,
   BotReplyWhitelist,
   ResolvedBotConfig,
+  ResolvedHeartbeatConfig,
   ResolvedReplyWhitelist,
   RuntimeContext,
   RuntimePaths
 } from "./domain.js";
+
+const HeartbeatConfigSchema = z
+  .object({
+    intervalMs: z.number().int().positive().optional(),
+    randomIntervalMs: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
+    batchSize: z.number().int().positive().optional()
+  })
+  .superRefine((value, ctx) => {
+    const scheduleCount = Number(value.intervalMs !== undefined) + Number(value.randomIntervalMs !== undefined);
+    if (scheduleCount !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "heartbeat must set exactly one of intervalMs or randomIntervalMs"
+      });
+    }
+
+    if (value.randomIntervalMs && value.randomIntervalMs[0] > value.randomIntervalMs[1]) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "heartbeat.randomIntervalMs must be ordered as [min, max]"
+      });
+    }
+  });
 
 const BotConfigSchema = z.object({
   botId: z.string().min(1),
@@ -24,6 +49,7 @@ const BotConfigSchema = z.object({
       groups: z.array(z.string().min(1)).optional()
     })
     .optional(),
+  heartbeat: HeartbeatConfigSchema.optional(),
   blockSize: z.number().int().positive().optional(),
   bubbleDelayMs: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).optional(),
   retrievalMinHits: z.number().int().positive().optional(),
@@ -103,7 +129,32 @@ function resolveReplyWhitelist(replyWhitelist: BotReplyWhitelist | undefined): R
   };
 }
 
-function resolveBotConfig(rawConfig: BotFileConfig): ResolvedBotConfig {
+function resolveHeartbeatConfig(
+  heartbeatConfig: BotHeartbeatConfig | undefined,
+  heartbeatInstructions: string | null
+): ResolvedHeartbeatConfig {
+  if (!heartbeatConfig) {
+    return {
+      enabled: false,
+      intervalMs: null,
+      randomIntervalMs: null,
+      batchSize: rootConfig.defaultHeartbeatBatchSize
+    };
+  }
+
+  if (!heartbeatInstructions) {
+    throw new Error("heartbeat.md must exist and be non-empty when heartbeat is configured.");
+  }
+
+  return {
+    enabled: true,
+    intervalMs: heartbeatConfig.intervalMs ?? null,
+    randomIntervalMs: heartbeatConfig.randomIntervalMs ?? null,
+    batchSize: heartbeatConfig.batchSize ?? rootConfig.defaultHeartbeatBatchSize
+  };
+}
+
+function resolveBotConfig(rawConfig: BotFileConfig, heartbeatInstructions: string | null): ResolvedBotConfig {
   const bubbleDelayMs = rawConfig.bubbleDelayMs ?? [...rootConfig.defaultBubbleDelayMs];
   if (bubbleDelayMs[0] > bubbleDelayMs[1]) {
     throw new Error("bubbleDelayMs must be ordered as [min, max].");
@@ -115,6 +166,7 @@ function resolveBotConfig(rawConfig: BotFileConfig): ResolvedBotConfig {
     admins: [...new Set(rawConfig.admins)],
     messagePrefix: rawConfig.messagePrefix ?? "",
     replyWhitelist: resolveReplyWhitelist(rawConfig.replyWhitelist),
+    heartbeat: resolveHeartbeatConfig(rawConfig.heartbeat, heartbeatInstructions),
     blockSize: rawConfig.blockSize ?? rootConfig.defaultBlockSize,
     bubbleDelayMs,
     retrievalMinHits: rawConfig.retrievalMinHits ?? rootConfig.defaultRetrievalMinHits,
@@ -135,6 +187,7 @@ export function loadRuntimeContext(): RuntimeContext {
     botPath,
     personaPath: path.join(botPath, "persona.md"),
     botConfigPath: path.join(botPath, "bot.json"),
+    heartbeatPath: path.join(botPath, "heartbeat.md"),
     dbPath: path.join(botPath, "bot.db"),
     authDir: path.join(botPath, "auth"),
     mediaDir: path.join(botPath, "media"),
@@ -150,14 +203,25 @@ export function loadRuntimeContext(): RuntimeContext {
     throw new Error("persona.md must not be empty.");
   }
 
+  let heartbeatInstructions: string | null = null;
+  try {
+    if (statSync(paths.heartbeatPath).isFile()) {
+      const resolved = readFileSync(paths.heartbeatPath, "utf8").trim();
+      heartbeatInstructions = resolved || null;
+    }
+  } catch {
+    heartbeatInstructions = null;
+  }
+
   const botFileConfig = BotConfigSchema.parse(
     JSON.parse(readFileSync(paths.botConfigPath, "utf8"))
   ) as BotFileConfig;
 
   return {
     rootConfig,
-    botConfig: resolveBotConfig(botFileConfig),
+    botConfig: resolveBotConfig(botFileConfig, heartbeatInstructions),
     persona,
+    heartbeatInstructions,
     paths
   };
 }

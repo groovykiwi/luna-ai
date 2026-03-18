@@ -42,6 +42,7 @@ export const rootConfig: RootConfig = {
   defaultBlockSize: 50,
   defaultBubbleDelayMs: [800, 2000],
   defaultRetrievalMinHits: 3,
+  defaultHeartbeatBatchSize: 8,
   memorySearchLimit: 5,
   rawArchiveSearchLimit: 5,
   recentWindowBlockLimit: 2,

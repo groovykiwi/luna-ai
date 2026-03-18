@@ -3,6 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 
 import type {
+  GeneratedHeartbeatDecision,
   GeneratedReply,
   NormalizedMessage,
   RuntimeContext,
@@ -41,6 +42,7 @@ export function createRuntimeContext(root: string): RuntimeContext {
       defaultBlockSize: 50,
       defaultBubbleDelayMs: [0, 0],
       defaultRetrievalMinHits: 3,
+      defaultHeartbeatBatchSize: 8,
       memorySearchLimit: 5,
       rawArchiveSearchLimit: 5,
       recentWindowBlockLimit: 2,
@@ -60,6 +62,12 @@ export function createRuntimeContext(root: string): RuntimeContext {
         dms: null,
         groups: null
       },
+      heartbeat: {
+        enabled: false,
+        intervalMs: null,
+        randomIntervalMs: null,
+        batchSize: 8
+      },
       blockSize: 2,
       bubbleDelayMs: [0, 0],
       retrievalMinHits: 3,
@@ -72,10 +80,12 @@ export function createRuntimeContext(root: string): RuntimeContext {
       retainProcessedMedia: false
     },
     persona: "You are Maya.",
+    heartbeatInstructions: null,
     paths: {
       botPath,
       personaPath: path.join(botPath, "persona.md"),
       botConfigPath: path.join(botPath, "bot.json"),
+      heartbeatPath: path.join(botPath, "heartbeat.md"),
       dbPath: path.join(botPath, "bot.db"),
       authDir,
       mediaDir,
@@ -102,8 +112,23 @@ export class FakeGateway implements LanguageGateway {
 
   readonly embedInputs: string[] = [];
 
+  readonly heartbeatInputs: Array<{
+    reviewMessages: StoredMessage[];
+    recentWindow: StoredMessage[];
+    retrievedMemoryBlock: string;
+    archiveFallbackBlock: string;
+    adminSenders: string[];
+    heartbeatInstructions: string;
+  }> = [];
+
   replyResult: GeneratedReply = {
     reply: "hi there",
+    memoryOperations: []
+  };
+
+  heartbeatResult: GeneratedHeartbeatDecision = {
+    shouldReply: false,
+    reply: "",
     memoryOperations: []
   };
 
@@ -133,6 +158,28 @@ export class FakeGateway implements LanguageGateway {
       adminSenders: input.adminSenders
     });
     return this.replyResult;
+  }
+
+  async generateHeartbeatDecision(input: {
+    persona: string;
+    heartbeatInstructions: string;
+    botId: string;
+    chatType: "dm" | "group";
+    recentWindow: StoredMessage[];
+    retrievedMemoryBlock: string;
+    archiveFallbackBlock: string;
+    reviewMessages: StoredMessage[];
+    adminSenders: string[];
+  }): Promise<GeneratedHeartbeatDecision> {
+    this.heartbeatInputs.push({
+      reviewMessages: input.reviewMessages,
+      recentWindow: input.recentWindow,
+      retrievedMemoryBlock: input.retrievedMemoryBlock,
+      archiveFallbackBlock: input.archiveFallbackBlock,
+      adminSenders: input.adminSenders,
+      heartbeatInstructions: input.heartbeatInstructions
+    });
+    return this.heartbeatResult;
   }
 
   async extractMemories(input: {

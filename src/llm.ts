@@ -1,27 +1,37 @@
 import { z } from "zod";
 
-import type { ExtractedMemory, GeneratedReply, ModelLanes, StoredMessage } from "./domain.js";
+import type {
+  ExtractedMemory,
+  GeneratedHeartbeatDecision,
+  GeneratedReply,
+  ModelLanes,
+  StoredMessage
+} from "./domain.js";
 import type { Logger } from "./logging.js";
 import { tryParseJson } from "./utils.js";
 
+const MemoryOperationSchema = z.union([
+  z.object({
+    type: z.literal("remember"),
+    category: z.enum(["person", "preference", "relationship", "running_joke", "event", "fact"]),
+    summary: z.string().trim().min(1),
+    details: z.string().trim().optional()
+  }),
+  z.object({
+    type: z.literal("forget"),
+    query: z.string().trim().min(1)
+  })
+]);
+
 const GeneratedReplySchema = z.object({
   reply: z.string().trim().min(1),
-  memoryOperations: z
-    .array(
-      z.union([
-        z.object({
-          type: z.literal("remember"),
-          category: z.enum(["person", "preference", "relationship", "running_joke", "event", "fact"]),
-          summary: z.string().trim().min(1),
-          details: z.string().trim().optional()
-        }),
-        z.object({
-          type: z.literal("forget"),
-          query: z.string().trim().min(1)
-        })
-      ])
-    )
-    .default([])
+  memoryOperations: z.array(MemoryOperationSchema).default([])
+});
+
+const GeneratedHeartbeatDecisionSchema = z.object({
+  shouldReply: z.boolean(),
+  reply: z.string().default(""),
+  memoryOperations: z.array(MemoryOperationSchema).default([])
 });
 
 const ExtractedMemorySchema = z.object({
@@ -71,6 +81,17 @@ export interface LanguageGateway {
     pendingMessages: StoredMessage[];
     adminSenders: string[];
   }): Promise<GeneratedReply>;
+  generateHeartbeatDecision(input: {
+    persona: string;
+    heartbeatInstructions: string;
+    botId: string;
+    chatType: "dm" | "group";
+    recentWindow: StoredMessage[];
+    retrievedMemoryBlock: string;
+    archiveFallbackBlock: string;
+    reviewMessages: StoredMessage[];
+    adminSenders: string[];
+  }): Promise<GeneratedHeartbeatDecision>;
   extractMemories(input: {
     persona: string;
     botId: string;
@@ -192,6 +213,71 @@ export class OpenRouterGateway implements LanguageGateway {
     );
 
     return GeneratedReplySchema.parse(parseLooseJson(response));
+  }
+
+  async generateHeartbeatDecision(input: {
+    persona: string;
+    heartbeatInstructions: string;
+    botId: string;
+    chatType: "dm" | "group";
+    recentWindow: StoredMessage[];
+    retrievedMemoryBlock: string;
+    archiveFallbackBlock: string;
+    reviewMessages: StoredMessage[];
+    adminSenders: string[];
+  }): Promise<GeneratedHeartbeatDecision> {
+    const response = await this.chatCompletion(
+      "main",
+      this.models.main,
+      [
+        {
+          role: "system",
+          content: [
+            input.persona,
+            "",
+            "Heartbeat instructions:",
+            input.heartbeatInstructions || "(none)",
+            "",
+            "Return strict JSON with shape:",
+            '{"shouldReply":true,"reply":"string","memoryOperations":[{"type":"remember","category":"fact","summary":"string","details":"string?"},{"type":"forget","query":"string"}]}',
+            "",
+            "Rules:",
+            "- Use the heartbeat instructions to decide whether to say anything at all.",
+            "- Set shouldReply to false when Maya should stay silent after checking the chat.",
+            '- When shouldReply is false, set reply to "".',
+            "- When shouldReply is true, reply must be plain text only, with no markdown fences.",
+            "- If an admin explicitly asks to remember or forget something, include the matching memoryOperations and comply.",
+            "- If a non-admin asks to remember or forget something, decide if it is appropriate before adding memoryOperations.",
+            "- Keep memoryOperations atomic and sparse. Use them only for explicit remember/forget actions.",
+            "- Stay selective. Do not jump into every conversation just because a heartbeat fired.",
+            "- Use the speaker names and recent context to stay grounded in the real conversation."
+          ].join("\n")
+        },
+        {
+          role: "user",
+          content: [
+            `Chat type: ${input.chatType}`,
+            `Bot id: ${input.botId}`,
+            `Admin senders in this heartbeat: ${input.adminSenders.length > 0 ? input.adminSenders.join(", ") : "none"}`,
+            "",
+            "Retrieved memories:",
+            input.retrievedMemoryBlock || "(none)",
+            "",
+            "Archive fallback:",
+            input.archiveFallbackBlock || "(none)",
+            "",
+            "Recent window (chronological context before the current heartbeat review):",
+            formatMessages(input.recentWindow),
+            "",
+            "Messages since the last review (this is what Maya is checking right now):",
+            formatMessages(input.reviewMessages)
+          ].join("\n")
+        }
+      ],
+      true
+    );
+
+    return GeneratedHeartbeatDecisionSchema.parse(parseLooseJson(response));
   }
 
   async extractMemories(input: {
