@@ -43,44 +43,6 @@ When a message block closes, the background worker extracts durable memories and
 
 If semantic memory retrieval is too sparse, Luna falls back to full-text search over older archived messages so the bot can still recover relevant raw context.
 
-## How It Works
-
-```mermaid
-flowchart TD
-    A["Inbound WhatsApp message"] --> B["Normalize message<br/>and optionally describe images"]
-    B --> C["Store message in SQLite<br/>inside the current block"]
-    C --> D{"Direct turn triggered?"}
-    D -- "Yes" --> E["Reply path"]
-    D -- "No" --> F["Heartbeat backlog"]
-
-    E --> E1["Recent live context window"]
-    E --> E2["Retrieve active memories by embedding"]
-    E --> E3["Fallback to archived raw messages if needed"]
-    E1 --> G["Generate reply"]
-    E2 --> G
-    E3 --> G
-    G --> H["Apply sparse remember/forget ops"]
-    H --> I["Send WhatsApp-sized bubbles<br/>with typing presence"]
-
-    C --> J{"Block reached blockSize?"}
-    J -- "Yes" --> K["Queue extract_block job"]
-    K --> L["Background worker extracts<br/>durable memories"]
-    L --> M["Active memory store"]
-
-    F --> N["Heartbeat review path"]
-    N --> E1
-    N --> E2
-    N --> E3
-    N --> O{"Reply or stay silent?"}
-    O -- "Reply" --> I
-    O -- "Silent" --> P["Mark chat reviewed"]
-```
-
-In practice the runtime is split into two long-running processes:
-
-- **Chat process:** receives WhatsApp messages, stores them, decides whether a direct turn is triggered, runs heartbeats, and sends replies.
-- **Worker process:** extracts long-term memories from closed blocks, reindexes memories, and prunes processed media.
-
 ## Quick Start
 
 ### Fastest Path
@@ -286,6 +248,44 @@ Useful local commands:
 - Runtime state lives in `bots/<bot-id>/`.
 - Copy `auth/` if you want to preserve the linked WhatsApp session.
 - Do not copy `bot.db`, `media/`, or `logs/` to a fresh deployment unless you intentionally want to migrate state.
+
+## How It Works
+
+```mermaid
+flowchart TD
+    A["Inbound WhatsApp message"] --> B["Normalize message<br/>and optionally describe images"]
+    B --> C["Store message in SQLite<br/>inside the current block"]
+    C --> D{"Direct turn triggered?"}
+    D -- "Yes" --> E["Reply path"]
+    D -- "No" --> F["Heartbeat backlog"]
+
+    E --> E1["Recent live context window"]
+    E --> E2["Retrieve active memories by embedding"]
+    E --> E3["Fallback to archived raw messages if needed"]
+    E1 --> G["Generate reply"]
+    E2 --> G
+    E3 --> G
+    G --> H["Apply sparse remember/forget ops"]
+    H --> I["Send WhatsApp-sized bubbles<br/>with typing presence"]
+
+    C --> J{"Block reached blockSize?"}
+    J -- "Yes" --> K["Queue extract_block job"]
+    K --> L["Background worker extracts<br/>durable memories"]
+    L --> M["Active memory store"]
+
+    F --> N["Heartbeat review path"]
+    N --> E1
+    N --> E2
+    N --> E3
+    N --> O{"Reply or stay silent?"}
+    O -- "Reply" --> I
+    O -- "Silent" --> P["Mark chat reviewed"]
+```
+
+In practice the runtime is split into two long-running processes:
+
+- **Chat process:** receives WhatsApp messages, stores them, decides whether a direct turn is triggered, runs heartbeats, and sends replies.
+- **Worker process:** extracts long-term memories from closed blocks, reindexes memories, and prunes processed media.
 
 ## Why The Architecture Stays Small
 
