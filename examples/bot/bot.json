@@ -1,12 +1,8 @@
 {
   "botId": "example-bot",
+  "provider": "whatsapp",
   "triggerNames": ["maya"],
-  "admins": [],
   "messagePrefix": "",
-  "replyWhitelist": {
-    "dms": [],
-    "groups": []
-  },
   "heartbeat": {
     "intervalMs": 3600000,
     "batchSize": 8
@@ -20,5 +16,19 @@
     "vision": "openai/gpt-4o-mini",
     "embed": "openai/text-embedding-3-small"
   },
-  "retainProcessedMedia": false
+  "retainProcessedMedia": false,
+  "whatsapp": {
+    "admins": [],
+    "replyWhitelist": {
+      "dms": [],
+      "groups": []
+    }
+  },
+  "telegram": {
+    "admins": [],
+    "replyWhitelist": {
+      "dms": [],
+      "groups": []
+    }
+  }
 }

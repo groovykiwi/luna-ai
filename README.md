@@ -3,7 +3,7 @@
 </p>
 
 # Luna AI
-Memory-first WhatsApp bots with short-term context, long-term recall, and ambient presence.
+Memory-first chat bots with short-term context, long-term recall, and ambient presence.
 
 <p>
   <img alt="Node 22" src="https://img.shields.io/badge/Node-22-111827?style=flat-square&logo=node.js&logoColor=8cc84b">
@@ -13,7 +13,7 @@ Memory-first WhatsApp bots with short-term context, long-term recall, and ambien
   <img alt="OpenRouter" src="https://img.shields.io/badge/LLM-OpenRouter-111827?style=flat-square">
 </p>
 
-Luna AI is an opinionated framework for building WhatsApp bots that feel like they actually know the people they talk to. It is built around a three-layer memory model:
+Luna AI is an opinionated framework for building chat bots that feel like they actually know the people they talk to. It is built around a three-layer memory model:
 
 - a hot recent window for what is happening right now
 - durable long-term memories extracted from finished conversation blocks
@@ -26,7 +26,7 @@ That lets the bot stay grounded without stuffing entire chat histories into ever
 - **Three-layer memory, not just chat history.** Live turns get recent context, retrieved memories, and archive fallback.
 - **Asynchronous memory extraction.** Closed conversation blocks are processed in the background into durable facts, preferences, relationships, events, and running jokes.
 - **Heartbeat-driven ambient behavior.** The bot can periodically review chat backlog and decide whether to jump in or stay silent.
-- **WhatsApp-native delivery.** QR auth, persistent sessions, typing presence, multi-bubble replies, and image descriptions are built in.
+- **Provider-aware delivery.** WhatsApp gets QR auth and persistent sessions; Telegram gets BotFather token auth and long polling.
 - **Cheap, portable ops.** Each bot lives in a single folder with persona, config, SQLite state, auth files, media, and logs.
 
 ## The Memory Model
@@ -56,7 +56,7 @@ The installer:
 - clones the repo
 - scaffolds `bots/<bot-id>/`
 - writes `.env`
-- offers WhatsApp QR authentication during install
+- offers unified auth setup during install
 - can start Docker for you immediately
 
 ### Manual Docker Setup
@@ -75,10 +75,10 @@ Then edit the bot:
 - `bots/maya/bot.json`
 - `bots/maya/heartbeat.md`
 
-Before the first real run, link WhatsApp:
+Before the first real run, run auth setup:
 
 ```bash
-./scripts/whatsapp-auth.sh --build-image
+./scripts/auth-setup.sh --build-image
 ```
 
 Then start Luna:
@@ -90,15 +90,18 @@ docker compose logs -f
 
 ## First-Time Bot Setup
 
-The scaffold starts conservative. By default, the example `replyWhitelist` blocks both DMs and groups until you open them up.
+The scaffold starts conservative. By default, the example provider configs block both DMs and groups until you open them up.
 
 This is the part that usually matters first:
 
 ```json
 {
+  "provider": "whatsapp",
   "triggerNames": ["maya"],
-  "replyWhitelist": {
-    "groups": ["1203630XXXXXXXX@g.us"]
+  "whatsapp": {
+    "replyWhitelist": {
+      "groups": ["1203630XXXXXXXX@g.us"]
+    }
   }
 }
 ```
@@ -110,42 +113,112 @@ Rules to remember:
 - Omit `groups` to allow all groups.
 - Set `groups` to specific JIDs to allow only those groups.
 - In groups, Luna only replies when it is mentioned, directly replied to, or its trigger name appears in the text.
+- `provider` defaults to `whatsapp` when omitted.
+- Shared runtime settings live at the top level of `bot.json`.
+- Provider blocks only hold provider-specific identifiers and allowlists such as `admins` and `replyWhitelist`.
+- You can keep both provider sections in one file; Luna only uses the section selected by `provider`.
+- Shared fields inside `whatsapp` or `telegram` are not supported.
 
-## WhatsApp Authentication
+## Auth Setup
 
-You do not need to rely on detached Docker logs to catch a QR anymore. Luna ships with a dedicated auth command.
+Luna ships with a unified auth helper that can set up WhatsApp, Telegram, or both in sequence.
 
-Run auth:
+Run the helper and choose interactively:
 
 ```bash
-./scripts/whatsapp-auth.sh
+./scripts/auth-setup.sh
 ```
 
-Force a fresh QR login:
+Run WhatsApp only:
 
 ```bash
-./scripts/whatsapp-auth.sh --reset
+./scripts/auth-setup.sh --whatsapp
 ```
 
-`--reinit` is supported as an alias for `--reset`.
-
-Smoke-test the QR UX without touching real auth state:
+Run Telegram only:
 
 ```bash
-./scripts/whatsapp-auth.sh --demo
+./scripts/auth-setup.sh --telegram
+```
+
+If `TELEGRAM_BOT_TOKEN` is missing, the helper will prompt for it and save it to `.env`.
+
+Run both:
+
+```bash
+./scripts/auth-setup.sh --both
+```
+
+Reset auth state before setup:
+
+```bash
+./scripts/auth-setup.sh --whatsapp --reset
+```
+
+Smoke-test the WhatsApp QR UX without touching real auth state:
+
+```bash
+./scripts/auth-setup.sh --whatsapp --demo-whatsapp
 ```
 
 See all options:
 
 ```bash
-./scripts/whatsapp-auth.sh --help
+./scripts/auth-setup.sh --help
 ```
 
 Notes:
 
-- If an auth session already exists, the command will reuse it and tell you so.
-- Use `--reset` or `--reinit` when you want a brand new WhatsApp link.
-- If Luna is already running, the auth helper stops the service, performs auth, and starts it again afterward.
+- The helper can configure both providers even though only the provider selected by `bot.json` is used at runtime.
+- If a WhatsApp auth session already exists, the command will reuse it and tell you so.
+- Use `--reset` or `--reinit` to clear WhatsApp session state or to clear Telegram webhook configuration and pending updates before validation.
+- Telegram uses a BotFather-issued token from `TELEGRAM_BOT_TOKEN`; it does not use QR auth or persisted local session files.
+- If Luna is already running, the helper stops the service, performs setup, and starts it again afterward.
+
+## WhatsApp ID Lookup
+
+For WhatsApp config:
+
+- `whatsapp.replyWhitelist.dms` expects the DM chat JID
+- `whatsapp.replyWhitelist.groups` expects the group chat JID
+- `whatsapp.admins` expects the sender JID
+
+After someone sends the bot a WhatsApp DM or mentions it in a group, run:
+
+```bash
+./scripts/whatsapp-ids.sh
+```
+
+That prints the exact `bot.json` values Luna expects for DMs, groups, and admins.
+
+## Telegram Setup
+
+Telegram bots use a BotFather-issued token instead of QR auth.
+
+1. Create the bot with `@BotFather`.
+2. Put the token in `.env` as `TELEGRAM_BOT_TOKEN=...`.
+3. Keep a `telegram` block in `bot.json`.
+4. Run `./scripts/auth-setup.sh --telegram` or include Telegram in `--both`.
+
+Current Telegram support is intentionally minimal:
+
+- private chats only
+- text messages only
+- no groups, channels, or media handling yet
+- long polling only; webhook hosting is intentionally out of scope
+
+For Telegram config:
+
+- `telegram.replyWhitelist.dms` expects `tg:chat:<chat_id>`
+- `telegram.admins` expects `tg:user:<user_id>`
+
+After someone sends the bot a DM, run:
+
+```bash
+./scripts/telegram-ids.sh
+```
+
+That prints both values in the exact `bot.json` format Luna expects.
 
 ## Heartbeats
 
@@ -188,18 +261,20 @@ These are the fields you will tune most often in `bot.json`:
 
 | Field | What it does |
 | --- | --- |
-| `triggerNames` | Names that trigger the bot in group chats. |
-| `replyWhitelist` | Controls which DMs and groups the bot is allowed to answer. |
-| `heartbeat` | Enables ambient reviews on a fixed or random interval. |
-| `blockSize` | Number of messages per block before extraction is queued. |
-| `bubbleDelayMs` | Delay range between multi-bubble WhatsApp replies. |
-| `messagePrefix` | Prefix applied to every outbound bubble. |
-| `retrievalMinHits` | Minimum semantic-memory hits before archive fallback kicks in. |
-| `retainProcessedMedia` | Keeps inbound media on disk instead of pruning it after processing. |
-| `models.main` | Main reply and heartbeat model. |
-| `models.extract` | Memory extraction model. |
-| `models.vision` | Inbound image description model. |
-| `models.embed` | Embedding model for retrieval. |
+| `provider` | Selects which provider block Luna will use: `whatsapp` or `telegram`. |
+| `triggerNames` | Top-level. Names that trigger the bot in group chats. |
+| `heartbeat` | Top-level. Enables ambient reviews on a fixed or random interval. |
+| `blockSize` | Top-level. Number of messages per block before extraction is queued. |
+| `bubbleDelayMs` | Top-level. Delay range between multi-bubble WhatsApp replies. |
+| `messagePrefix` | Top-level. Prefix applied to every outbound bubble. |
+| `retrievalMinHits` | Top-level. Minimum semantic-memory hits before archive fallback kicks in. |
+| `retainProcessedMedia` | Top-level. Keeps inbound media on disk instead of pruning it after processing. |
+| `models.main` | Top-level. Main reply and heartbeat model. |
+| `models.extract` | Top-level. Memory extraction model. |
+| `models.vision` | Top-level. Inbound image description model. |
+| `models.embed` | Top-level. Embedding model for retrieval. |
+| `whatsapp.admins` / `telegram.admins` | Provider block. Sender IDs treated as admins for prompting. |
+| `whatsapp.replyWhitelist` / `telegram.replyWhitelist` | Provider block. Controls which DMs and groups the bot is allowed to answer on that provider. |
 
 ## What Gets Stored
 
@@ -209,7 +284,7 @@ Each bot has its own folder under `bots/<bot-id>/`:
 - `heartbeat.md`: ambient participation instructions
 - `bot.json`: runtime configuration
 - `bot.db`: SQLite state, messages, blocks, jobs, and memory items
-- `auth/`: WhatsApp session state
+- `auth/`: WhatsApp session state (Telegram does not use it)
 - `media/`: downloaded inbound media
 - `logs/`: runtime logs
 
@@ -228,7 +303,7 @@ corepack enable
 pnpm install
 pnpm approve-builds --all
 cp .env.example .env
-# fill in OPENROUTER_API_KEY and confirm BOT_PATH
+# fill in OPENROUTER_API_KEY, confirm BOT_PATH, and set TELEGRAM_BOT_TOKEN for Telegram bots
 ./scripts/init-bot.sh maya
 pnpm auth
 pnpm worker
@@ -240,6 +315,7 @@ Useful local commands:
 - `pnpm auth`
 - `pnpm reauth`
 - `pnpm reinit`
+- `./scripts/auth-setup.sh`
 - `pnpm test`
 - `pnpm check`
 
@@ -253,7 +329,7 @@ Useful local commands:
 
 ```mermaid
 flowchart TD
-    A["Inbound WhatsApp message"] --> B["Normalize message<br/>and optionally describe images"]
+    A["Inbound provider message"] --> B["Normalize message<br/>and optionally describe images"]
     B --> C["Store message in SQLite<br/>inside the current block"]
     C --> D{"Direct turn triggered?"}
     D -- "Yes" --> E["Reply path"]
@@ -266,7 +342,7 @@ flowchart TD
     E2 --> G
     E3 --> G
     G --> H["Apply sparse remember/forget ops"]
-    H --> I["Send WhatsApp-sized bubbles<br/>with typing presence"]
+    H --> I["Send outbound bubbles<br/>with typing presence"]
 
     C --> J{"Block reached blockSize?"}
     J -- "Yes" --> K["Queue extract_block job"]
@@ -284,9 +360,9 @@ flowchart TD
 
 In practice the runtime is split into two long-running processes:
 
-- **Chat process:** receives WhatsApp messages, stores them, decides whether a direct turn is triggered, runs heartbeats, and sends replies.
+- **Chat process:** receives WhatsApp or Telegram messages, stores them, decides whether a direct turn is triggered, runs heartbeats, and sends replies.
 - **Worker process:** extracts long-term memories from closed blocks, reindexes memories, and prunes processed media.
 
 ## Why The Architecture Stays Small
 
-Luna is intentionally narrow. It does not try to be a generic agent framework, a workflow engine, or a multi-channel CRM. The point is to run a WhatsApp bot with a strong persona, durable memory, selective ambient behavior, and low operational drag.
+Luna is intentionally narrow. It does not try to be a generic agent framework, a workflow engine, or a multi-channel CRM. The point is to run a persona-driven bot with durable memory, selective ambient behavior, and low operational drag, with shared runtime config at the top of `bot.json` and provider-specific identity blocks for WhatsApp and Telegram selected by `provider`.
