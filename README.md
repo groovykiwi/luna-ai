@@ -98,15 +98,30 @@ docker compose logs -f
 
 The scaffold starts conservative. By default, the example provider configs block both DMs and groups until you open them up.
 
-This is the part that usually matters first:
+Shared runtime settings stay at the top level of `bot.json`. Provider-specific identity config lives inside `whatsapp` and `telegram`.
+
+This is the shape Luna expects:
 
 ```json
 {
   "provider": "whatsapp",
   "triggerNames": ["maya"],
+  "messagePrefix": "",
+  "heartbeat": {
+    "intervalMs": 3600000,
+    "batchSize": 8
+  },
   "whatsapp": {
+    "admins": [],
     "replyWhitelist": {
+      "dms": [],
       "groups": ["1203630XXXXXXXX@g.us"]
+    }
+  },
+  "telegram": {
+    "admins": [],
+    "replyWhitelist": {
+      "dms": []
     }
   }
 }
@@ -128,6 +143,13 @@ Rules to remember:
 ## Auth Setup
 
 Luna ships with a unified auth helper that can set up WhatsApp, Telegram, or both in sequence.
+
+At startup, `./scripts/auth-setup.sh`:
+
+- shows the current `BOT_PATH` and resolved bot ID
+- lets you switch to another bot folder before doing any auth work
+- writes the chosen `BOT_PATH` and `BOT_HOST_PATH` back into `.env` so local `pnpm` runs and Docker point at the same bot folder by default
+- prefers Docker Compose when available, otherwise falls back to local `pnpm`
 
 Run the helper and choose interactively:
 
@@ -167,6 +189,12 @@ Smoke-test the WhatsApp QR UX without touching real auth state:
 ./scripts/auth-setup.sh --whatsapp --demo-whatsapp
 ```
 
+Build the Docker image before the first auth run:
+
+```bash
+./scripts/auth-setup.sh --build-image --both
+```
+
 See all options:
 
 ```bash
@@ -181,6 +209,21 @@ Notes:
 - Telegram uses a BotFather-issued token from `TELEGRAM_BOT_TOKEN`; it does not use QR auth or persisted local session files.
 - If Luna is already running, the helper stops the service, performs setup, and starts it again afterward.
 
+You can also call the auth CLI directly:
+
+```bash
+pnpm auth -- --provider whatsapp
+pnpm auth -- --provider telegram
+pnpm auth -- --provider whatsapp --demo-whatsapp
+pnpm auth -- --provider telegram --reset
+```
+
+Shortcuts:
+
+- `pnpm reauth` runs `pnpm auth -- --reset`
+- `pnpm reinit` runs `pnpm auth -- --reinit`
+- both shortcuts apply to the currently selected `provider` in `bot.json`
+
 ## WhatsApp ID Lookup
 
 For WhatsApp config:
@@ -193,6 +236,12 @@ After someone sends the bot a WhatsApp DM or mentions it in a group, run:
 
 ```bash
 ./scripts/whatsapp-ids.sh
+```
+
+Local CLI equivalent:
+
+```bash
+pnpm whatsapp-ids
 ```
 
 That prints the exact `bot.json` values Luna expects for DMs, groups, and admins.
@@ -217,6 +266,9 @@ For Telegram config:
 
 - `telegram.replyWhitelist.dms` expects `tg:chat:<chat_id>`
 - `telegram.admins` expects `tg:user:<user_id>`
+- in a normal 1:1 DM, the numeric `chat_id` and `user_id` are often the same number, but the prefixes are different and matter
+- `telegram.replyWhitelist.groups` is currently not useful because Telegram groups are ignored in v1
+- if Telegram private topics are enabled, Luna may store a DM as `tg:chat:<chat_id>:thread:<thread_id>`
 
 After someone sends the bot a DM, run:
 
@@ -224,7 +276,18 @@ After someone sends the bot a DM, run:
 ./scripts/telegram-ids.sh
 ```
 
+Local CLI equivalent:
+
+```bash
+pnpm telegram-ids
+```
+
 That prints both values in the exact `bot.json` format Luna expects.
+
+If you see a threaded chat ID like `tg:chat:123456789:thread:7`:
+
+- paste that exact value into `telegram.replyWhitelist.dms` if you want to allow only that thread
+- use `tg:chat:123456789` if you want to allow the whole DM across threads
 
 ## Heartbeats
 
@@ -324,7 +387,11 @@ Useful local commands:
 - `pnpm auth`
 - `pnpm reauth`
 - `pnpm reinit`
+- `pnpm telegram-ids`
+- `pnpm whatsapp-ids`
 - `./scripts/auth-setup.sh`
+- `./scripts/telegram-ids.sh`
+- `./scripts/whatsapp-ids.sh`
 - `pnpm test`
 - `pnpm check`
 
