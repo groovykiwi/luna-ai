@@ -7,6 +7,10 @@
     "dms": [],
     "groups": []
   },
+  "heartbeat": {
+    "intervalMs": 3600000,
+    "batchSize": 8
+  },
   "blockSize": 50,
   "bubbleDelayMs": [150, 400],
   "retrievalMinHits": 3,

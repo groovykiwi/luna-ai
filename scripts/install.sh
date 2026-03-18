@@ -18,6 +18,104 @@ require_command() {
   fi
 }
 
+has_docker_compose() {
+  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+}
+
+docker_engine_ready() {
+  has_docker_compose && docker info >/dev/null 2>&1
+}
+
+run_as_root() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    "$@"
+    return
+  fi
+
+  require_command sudo
+  sudo "$@"
+}
+
+wait_for_docker_engine() {
+  local timeout_seconds="${1:-60}"
+  local elapsed=0
+
+  while (( elapsed < timeout_seconds )); do
+    if docker_engine_ready; then
+      return 0
+    fi
+
+    sleep 2
+    elapsed=$((elapsed + 2))
+  done
+
+  return 1
+}
+
+install_docker_linux() {
+  require_command curl
+  printf '\nInstalling Docker Engine and Compose plugin using Docker''s official convenience script...\n'
+
+  if [[ "$(id -u)" -eq 0 ]]; then
+    curl -fsSL https://get.docker.com | sh
+  else
+    curl -fsSL https://get.docker.com | sudo sh
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_as_root systemctl enable --now docker || true
+  fi
+
+  if [[ "$(id -u)" -ne 0 && -n "${USER:-}" ]] && command -v usermod >/dev/null 2>&1; then
+    run_as_root usermod -aG docker "$USER" || true
+    printf 'Added %s to the docker group. You may need to sign out and back in before docker works without sudo.\n' "$USER"
+  fi
+}
+
+install_docker_macos() {
+  if ! command -v brew >/dev/null 2>&1; then
+    printf '\nDocker Desktop install on macOS requires Homebrew for this installer path.\n' >&2
+    printf 'Install Homebrew from https://brew.sh and re-run the installer, or install Docker Desktop manually.\n' >&2
+    return 1
+  fi
+
+  printf '\nInstalling Docker Desktop with Homebrew...\n'
+  brew install --cask docker
+
+  if command -v open >/dev/null 2>&1; then
+    open -a Docker || true
+    printf 'Docker Desktop has been launched. Complete any first-run prompts if they appear.\n'
+  fi
+}
+
+attempt_docker_install() {
+  case "$(uname -s)" in
+    Darwin)
+      install_docker_macos
+      ;;
+    Linux)
+      install_docker_linux
+      ;;
+    *)
+      printf '\nAutomatic Docker installation is not supported on this platform by the Luna installer.\n' >&2
+      return 1
+      ;;
+  esac
+}
+
+ensure_docker_available() {
+  if has_docker_compose; then
+    return 0
+  fi
+
+  printf '\nDocker Compose was not detected on this system.\n'
+  if ! confirm_yes_no "Attempt to install Docker now?" "y"; then
+    return 1
+  fi
+
+  attempt_docker_install
+}
+
 prompt_with_default() {
   local prompt="$1"
   local default_value="$2"
@@ -69,7 +167,7 @@ require_command git
 printf 'Luna AI installer\n'
 
 INSTALL_DIR="$(prompt_with_default "Install directory" "./luna-ai")"
-BOT_ID="$(prompt_with_default "Bot ID" "maya")"
+BOT_ID="$(prompt_with_default "Bot ID" "luna")"
 OPENROUTER_API_KEY="$(prompt_required_secret "OpenRouter API key")"
 
 if [[ -e "$INSTALL_DIR" ]]; then
@@ -96,7 +194,23 @@ printf 'Bot folder: %s\n' "bots/$BOT_ID"
 printf 'Edit persona: %s\n' "bots/$BOT_ID/persona.md"
 printf 'Edit config: %s\n' "bots/$BOT_ID/bot.json"
 
-if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+if ensure_docker_available; then
+  if ! has_docker_compose; then
+    printf '\nDocker installation finished, but the docker CLI or Compose plugin is still unavailable in this shell.\n'
+    printf 'Open a new shell after the install completes, then run: docker compose up -d --build\n'
+    exit 0
+  fi
+
+  if ! docker_engine_ready; then
+    printf '\nDocker is installed, but the engine is not ready yet.\n'
+    if wait_for_docker_engine 90; then
+      :
+    else
+      printf 'Start Docker Desktop or finish any first-run setup, then run: docker compose up -d --build\n'
+      exit 0
+    fi
+  fi
+
   if confirm_yes_no "Start Luna with docker compose now?" "y"; then
     docker compose up -d --build
     printf '\nLuna AI is starting.\n'
@@ -104,7 +218,7 @@ if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; 
     exit 0
   fi
 else
-  printf '\nDocker Compose was not detected. Start it later with: docker compose up -d --build\n'
+  printf '\nDocker was not installed. Install it later, then run: docker compose up -d --build\n'
 fi
 
 printf '\nNext step: cd %s && docker compose up -d --build\n' "$INSTALL_DIR"

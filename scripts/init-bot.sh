@@ -11,6 +11,7 @@ BOT_ID="$1"
 TARGET_DIR="${2:-bots/$BOT_ID}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ESCAPED_BOT_ID="$(printf '%s' "$BOT_ID" | sed 's/[\\/&]/\\&/g')"
 
 if [[ "$TARGET_DIR" = /* ]]; then
   TARGET_PATH="$TARGET_DIR"
@@ -29,14 +30,8 @@ cp "$REPO_ROOT/examples/bot/bot.json" "$TARGET_PATH/bot.json"
 cp "$REPO_ROOT/examples/bot/heartbeat.md" "$TARGET_PATH/heartbeat.md"
 mkdir -p "$TARGET_PATH/auth" "$TARGET_PATH/media" "$TARGET_PATH/logs"
 
-node --input-type=module -e '
-  import { readFileSync, writeFileSync } from "node:fs";
-
-  const botId = process.argv[1];
-  const filePath = process.argv[2];
-  const config = JSON.parse(readFileSync(filePath, "utf8"));
-  config.botId = botId;
-  writeFileSync(filePath, `${JSON.stringify(config, null, 2)}\n`);
-' "$BOT_ID" "$TARGET_PATH/bot.json"
+TMP_CONFIG_PATH="$TARGET_PATH/bot.json.tmp"
+sed "s/\"botId\": \"example-bot\"/\"botId\": \"$ESCAPED_BOT_ID\"/" "$TARGET_PATH/bot.json" > "$TMP_CONFIG_PATH"
+mv "$TMP_CONFIG_PATH" "$TARGET_PATH/bot.json"
 
 echo "initialized bot scaffold at $TARGET_DIR"

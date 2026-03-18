@@ -30,7 +30,12 @@ Luna AI is a minimal production-grade framework for running WhatsApp bots that f
 curl -fsSL https://raw.githubusercontent.com/groovykiwi/luna-ai/main/scripts/install.sh | bash
 ```
 
-The installer clones the repo, prompts for the bot ID and `OPENROUTER_API_KEY`, writes `.env`, initializes `bots/<bot-id>/`, and can start Docker immediately.
+Runtime requirements:
+
+- `git`
+- Docker with Compose
+
+The installer clones the repo, prompts for the bot ID and `OPENROUTER_API_KEY`, can help install missing Docker prerequisites, writes `.env`, initializes `bots/<bot-id>/`, and can start Docker immediately.
 
 Alternatively:
 ```bash
@@ -44,7 +49,14 @@ docker compose logs -f
 
 ## Local Dev
 
+Requirements:
+
+- Node.js 22+
+- `corepack` / `pnpm`
+- `git`
+
 ```bash
+corepack enable
 pnpm install
 pnpm approve-builds --all
 cp .env.example .env
