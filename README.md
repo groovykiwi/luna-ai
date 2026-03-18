@@ -65,9 +65,15 @@ The installer:
 git clone git@github.com:groovykiwi/luna-ai.git
 cd luna-ai
 cp .env.example .env
-# fill in OPENROUTER_API_KEY and confirm BOT_PATH / BOT_HOST_PATH
+# fill in OPENROUTER_API_KEY
+# BOT_PATH is used by local pnpm runs
+# BOT_HOST_PATH is the host folder Docker mounts into /bot
+# for simplicity, keep both set to the same bot folder in .env (for example ./bots/maya)
+# set TELEGRAM_BOT_TOKEN too if you plan to use Telegram
 ./scripts/init-bot.sh maya
 ```
+
+For Docker, `docker compose` mounts `BOT_HOST_PATH` from your machine into `/bot` inside the container and sets `BOT_PATH=/bot` there. For local `pnpm` runs, only `BOT_PATH` is read directly.
 
 Then edit the bot:
 
@@ -303,7 +309,10 @@ corepack enable
 pnpm install
 pnpm approve-builds --all
 cp .env.example .env
-# fill in OPENROUTER_API_KEY, confirm BOT_PATH, and set TELEGRAM_BOT_TOKEN for Telegram bots
+# fill in OPENROUTER_API_KEY
+# BOT_PATH should point at your bot folder for local pnpm runs
+# BOT_HOST_PATH only matters for Docker; keep it the same for simplicity
+# set TELEGRAM_BOT_TOKEN for Telegram bots
 ./scripts/init-bot.sh maya
 pnpm auth
 pnpm worker

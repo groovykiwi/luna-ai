@@ -31,7 +31,7 @@ cp "$REPO_ROOT/examples/bot/heartbeat.md" "$TARGET_PATH/heartbeat.md"
 mkdir -p "$TARGET_PATH/auth" "$TARGET_PATH/media" "$TARGET_PATH/logs"
 
 TMP_CONFIG_PATH="$TARGET_PATH/bot.json.tmp"
-sed "s/\"botId\": \"example-bot\"/\"botId\": \"$ESCAPED_BOT_ID\"/" "$TARGET_PATH/bot.json" > "$TMP_CONFIG_PATH"
+sed "s/\"example-bot\"/\"$ESCAPED_BOT_ID\"/g" "$TARGET_PATH/bot.json" > "$TMP_CONFIG_PATH"
 mv "$TMP_CONFIG_PATH" "$TARGET_PATH/bot.json"
 
 echo "initialized bot scaffold at $TARGET_DIR"

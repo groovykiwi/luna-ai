@@ -1,7 +1,7 @@
 {
   "botId": "example-bot",
   "provider": "whatsapp",
-  "triggerNames": ["maya"],
+  "triggerNames": ["example-bot"],
   "messagePrefix": "",
   "heartbeat": {
     "intervalMs": 3600000,
