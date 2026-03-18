@@ -2,6 +2,7 @@ import type { RuntimeContext, StoredMessage } from "./domain.js";
 import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import { formatArchiveHits, formatRetrievedMemories, MemoryService } from "./memory.js";
+import { sanitizeGeneratedBubble } from "./output.js";
 import { chunkText } from "./utils.js";
 
 export function splitReplyIntoBubbles(text: string): string[] {
@@ -46,6 +47,12 @@ export function splitReplyIntoBubbles(text: string): string[] {
   return bubbles.filter(Boolean);
 }
 
+export function prepareReplyBubbles(text: string, input: { botId: string; messagePrefix: string }): string[] {
+  return splitReplyIntoBubbles(text)
+    .map((bubble) => sanitizeGeneratedBubble(bubble, input))
+    .filter(Boolean);
+}
+
 export class ReplyService {
   constructor(
     private readonly db: LunaDb,
@@ -85,6 +92,7 @@ export class ReplyService {
     const replyEnvelope = await this.gateway.generateReply({
       persona: this.runtimeContext.persona,
       botId: this.runtimeContext.botConfig.botId,
+      messagePrefix: this.runtimeContext.botConfig.messagePrefix,
       chatType: chat.type,
       recentWindow,
       retrievedMemoryBlock: formatRetrievedMemories(retrieval.memories),

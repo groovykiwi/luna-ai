@@ -145,6 +145,52 @@ describe("turn coalescing", () => {
     ]);
   });
 
+  it("strips duplicated self-labels from generated bubbles and stores bot history without the transport prefix", async () => {
+    const root = createTempRoot();
+    roots.push(root);
+    const runtimeContext = createRuntimeContext(root);
+    runtimeContext.botConfig.botId = "luna";
+    runtimeContext.botConfig.messagePrefix = "🌙 ";
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const gateway = new FakeGateway();
+    gateway.replyResult = {
+      reply: "🌙 luna: 🌙 first bubble\n\nluna: second bubble",
+      memoryOperations: []
+    };
+    const transport = new MockTransport();
+    const logger = createLogger(`${runtimeContext.paths.logsDir}/chat-sanitize-test.log`, "chat-sanitize-test");
+    const runtime = new ChatRuntime(runtimeContext, db, transport, gateway, logger);
+    await runtime.start();
+
+    await transport.push(
+      makeIncomingMessage({
+        externalId: "dm-sanitize-1",
+        text: "hello",
+        chatJid: "user@s.whatsapp.net",
+        senderJid: "user@s.whatsapp.net"
+      })
+    );
+
+    await waitFor(() => {
+      expect(transport.sent).toHaveLength(2);
+    });
+
+    expect(transport.sent.map((message) => message.text)).toEqual([
+      "🌙 first bubble",
+      "🌙 second bubble"
+    ]);
+
+    const stored = db.connection
+      .prepare("SELECT text, raw_json AS rawJson FROM messages WHERE is_from_bot = 1 ORDER BY id ASC")
+      .all() as Array<{ text: string; rawJson: string }>;
+
+    expect(stored.map((row) => row.text)).toEqual(["first bubble", "second bubble"]);
+    expect(stored.map((row) => JSON.parse(row.rawJson).deliveredText)).toEqual([
+      "🌙 first bubble",
+      "🌙 second bubble"
+    ]);
+  });
+
   it("retries a failed turn and eventually clears the pending messages", async () => {
     const root = createTempRoot();
     roots.push(root);

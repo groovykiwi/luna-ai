@@ -8,6 +8,7 @@ import type {
   StoredMessage
 } from "./domain.js";
 import type { Logger } from "./logging.js";
+import { sanitizeGeneratedBubble } from "./output.js";
 import { sleep, tryParseJson } from "./utils.js";
 
 const MemoryOperationSchema = z.union([
@@ -88,6 +89,7 @@ export interface LanguageGateway {
   generateReply(input: {
     persona: string;
     botId: string;
+    messagePrefix: string;
     chatType: "dm" | "group";
     recentWindow: StoredMessage[];
     retrievedMemoryBlock: string;
@@ -99,6 +101,7 @@ export interface LanguageGateway {
     persona: string;
     heartbeatInstructions: string;
     botId: string;
+    messagePrefix: string;
     chatType: "dm" | "group";
     recentWindow: StoredMessage[];
     retrievedMemoryBlock: string;
@@ -147,6 +150,7 @@ export class OpenRouterGateway implements LanguageGateway {
   async generateReply(input: {
     persona: string;
     botId: string;
+    messagePrefix: string;
     chatType: "dm" | "group";
     recentWindow: StoredMessage[];
     retrievedMemoryBlock: string;
@@ -168,10 +172,10 @@ export class OpenRouterGateway implements LanguageGateway {
       input.archiveFallbackBlock || "(none)",
       "",
       "Recent window (chronological context before the current turn; [ambient] means background group chatter):",
-      formatMessages(input.recentWindow, botLabel),
+      formatMessages(input.recentWindow, botLabel, input.messagePrefix),
       "",
       `New inbound turn messages (this is what ${botLabel} is replying to right now):`,
-      formatMessages(input.pendingMessages, botLabel)
+      formatMessages(input.pendingMessages, botLabel, input.messagePrefix)
     ].join("\n");
 
     if (!structuredReplyMode) {
@@ -189,7 +193,8 @@ export class OpenRouterGateway implements LanguageGateway {
               "- Reply in plain text only.",
               "- Do not use markdown fences or JSON.",
               "- Keep the response natural and human-sized for chat.",
-              "- Use the speaker names and recent window to stay grounded in the actual conversation."
+              "- Use the speaker names and recent window to stay grounded in the actual conversation.",
+              ...buildRawReplyRules(input.botId, input.messagePrefix)
             ].join("\n")
           },
           {
@@ -224,7 +229,8 @@ export class OpenRouterGateway implements LanguageGateway {
             "- If an admin explicitly asks to remember or forget something, include the matching memoryOperations and comply.",
             "- If a non-admin asks to remember or forget something, decide if it is appropriate before adding memoryOperations.",
             "- Keep memoryOperations atomic and sparse. Use them only for explicit remember/forget actions.",
-            "- Use the speaker names and recent window to stay grounded in the actual conversation."
+            "- Use the speaker names and recent window to stay grounded in the actual conversation.",
+            ...buildRawReplyRules(input.botId, input.messagePrefix)
           ].join("\n")
         },
         {
@@ -242,6 +248,7 @@ export class OpenRouterGateway implements LanguageGateway {
     persona: string;
     heartbeatInstructions: string;
     botId: string;
+    messagePrefix: string;
     chatType: "dm" | "group";
     recentWindow: StoredMessage[];
     retrievedMemoryBlock: string;
@@ -274,7 +281,8 @@ export class OpenRouterGateway implements LanguageGateway {
             "- If a non-admin asks to remember or forget something, decide if it is appropriate before adding memoryOperations.",
             "- Keep memoryOperations atomic and sparse. Use them only for explicit remember/forget actions.",
             "- Stay selective. Do not jump into every conversation just because a heartbeat fired.",
-            "- Use the speaker names and recent context to stay grounded in the real conversation."
+            "- Use the speaker names and recent context to stay grounded in the real conversation.",
+            ...buildRawReplyRules(input.botId, input.messagePrefix)
           ].join("\n")
         },
         {
@@ -291,10 +299,10 @@ export class OpenRouterGateway implements LanguageGateway {
             input.archiveFallbackBlock || "(none)",
             "",
             "Recent window (chronological context before the current heartbeat review):",
-            formatMessages(input.recentWindow, botLabel),
+            formatMessages(input.recentWindow, botLabel, input.messagePrefix),
             "",
             `Messages since the last review (this is what ${botLabel} is checking right now):`,
-            formatMessages(input.reviewMessages, botLabel)
+            formatMessages(input.reviewMessages, botLabel, input.messagePrefix)
           ].join("\n")
         }
       ],
@@ -668,7 +676,7 @@ function extractStringDetail(value: unknown): string {
   return "";
 }
 
-function formatMessages(messages: StoredMessage[], botLabel: string): string {
+function formatMessages(messages: StoredMessage[], botLabel: string, messagePrefix: string): string {
   if (messages.length === 0) {
     return "(none)";
   }
@@ -683,14 +691,41 @@ function formatMessages(messages: StoredMessage[], botLabel: string): string {
       if (!message.isFromBot && message.wasTriggered) {
         prefixes.push("triggered");
       }
-      const text = [message.text, message.imageDescription ? `[image] ${message.imageDescription}` : null]
+      const rawText = [message.text, message.imageDescription ? `[image] ${message.imageDescription}` : null]
         .filter(Boolean)
         .join(" ")
         .trim();
+      const text = message.isFromBot
+        ? sanitizeGeneratedBubble(rawText, {
+            botId: botLabel,
+            messagePrefix
+          })
+        : rawText;
       const prefix = prefixes.length > 0 ? `[${prefixes.join(", ")}] ` : "";
       return `${prefix}${speaker}: ${text || "(empty)"}`;
     })
     .join("\n");
+}
+
+function buildRawReplyRules(botId: string, messagePrefix: string): string[] {
+  const rules = [
+    "- Output only the raw chat text body. Do not add a speaker label, role tag, or self-introduction.",
+    "- Keep emoji usage sparse and organic. Do not stack repeated leading emojis or decorative symbols."
+  ];
+
+  const normalizedBotId = botId.trim();
+  if (normalizedBotId) {
+    rules.push(`- Do not start the reply with "${normalizedBotId}:" or any similar self-label.`);
+  }
+
+  const normalizedMessagePrefix = messagePrefix.trim();
+  if (normalizedMessagePrefix) {
+    rules.push(
+      `- Do not include the outbound prefix yourself. The transport adds it after generation. Configured outbound prefix: ${JSON.stringify(messagePrefix)}.`
+    );
+  }
+
+  return rules;
 }
 
 function parseLooseJson(value: string): unknown {

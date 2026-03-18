@@ -927,6 +927,7 @@ export class LunaDb {
     senderJid: string,
     externalId: string,
     text: string,
+    deliveredText: string,
     createdAt: string,
     blockSize: number
   ): { messageId: number; chatId: number } {
@@ -942,7 +943,7 @@ export class LunaDb {
         imageDescription: null,
         quotedExternalId: null,
         mentions: [],
-        rawJson: JSON.stringify({ source: "bot" }),
+        rawJson: JSON.stringify({ source: "bot", deliveredText }),
         createdAt,
         isFromBot: true
       },

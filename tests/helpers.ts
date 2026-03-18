@@ -148,6 +148,7 @@ export class FakeGateway implements LanguageGateway {
   async generateReply(input: {
     persona: string;
     botId: string;
+    messagePrefix: string;
     chatType: "dm" | "group";
     recentWindow: StoredMessage[];
     retrievedMemoryBlock: string;
@@ -169,6 +170,7 @@ export class FakeGateway implements LanguageGateway {
     persona: string;
     heartbeatInstructions: string;
     botId: string;
+    messagePrefix: string;
     chatType: "dm" | "group";
     recentWindow: StoredMessage[];
     retrievedMemoryBlock: string;

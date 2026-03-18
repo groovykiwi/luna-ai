@@ -8,7 +8,7 @@ import type { LanguageGateway } from "../llm.js";
 import type { ChatTransport } from "../transport.js";
 import { persistInboundImage } from "../media.js";
 import { MemoryService } from "../memory.js";
-import { ReplyService, splitReplyIntoBubbles } from "../reply.js";
+import { prepareReplyBubbles, ReplyService } from "../reply.js";
 import { randomIntInclusive, sleep } from "../utils.js";
 import { detectTrigger } from "./trigger.js";
 import { TurnQueue } from "./queue.js";
@@ -261,7 +261,11 @@ export class ChatRuntime {
         const generated = await this.replyService.generateForTurn(chatId, pendingMessages);
         const generationMs = Date.now() - generationStartedAt;
         const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
-        if (splitReplyIntoBubbles(generated.reply).length === 0) {
+        const bubbles = prepareReplyBubbles(generated.reply, {
+          botId: this.runtimeContext.botConfig.botId,
+          messagePrefix: this.runtimeContext.botConfig.messagePrefix
+        });
+        if (bubbles.length === 0) {
           this.db.markTurnMessagesProcessed(
             pendingMessages.map((message) => message.id),
             generated.memoryAppliedAt
@@ -278,7 +282,7 @@ export class ChatRuntime {
           return this.db.getPendingTurnMessages(chatId).length > 0;
         }
 
-        const sent = await this.sendReply(chat.jid, chat.type, generated.reply);
+        const sent = await this.sendReply(chat.jid, chat.type, bubbles);
         const completedAt = new Date().toISOString();
 
         this.db.markTurnMessagesProcessed(
@@ -414,7 +418,23 @@ export class ChatRuntime {
         continue;
       }
 
-      const sent = await this.runWithTypingPresence(chat.jid, async () => this.sendReply(chat.jid, chat.type, generated.reply));
+      const bubbles = prepareReplyBubbles(generated.reply, {
+        botId: this.runtimeContext.botConfig.botId,
+        messagePrefix: this.runtimeContext.botConfig.messagePrefix
+      });
+      if (bubbles.length === 0) {
+        this.db.markChatReviewedThrough(chatId, lastReviewMessage.id, generated.memoryAppliedAt);
+        this.logger.info("heartbeat sanitized to silence", {
+          chatId,
+          chatJid: chat.jid,
+          chatType: chat.type,
+          reviewedMessageCount: reviewMessages.length,
+          decisionMs
+        });
+        continue;
+      }
+
+      const sent = await this.runWithTypingPresence(chat.jid, async () => this.sendReply(chat.jid, chat.type, bubbles));
       const completedAt = new Date().toISOString();
       this.db.markChatReviewedThrough(chatId, lastReviewMessage.id, completedAt);
 
@@ -461,8 +481,7 @@ export class ChatRuntime {
     return prefix ? `${prefix}${text}` : text;
   }
 
-  private async sendReply(chatJid: string, chatType: ChatType, reply: string): Promise<{ bubbleCount: number; sendMs: number }> {
-    const bubbles = splitReplyIntoBubbles(reply);
+  private async sendReply(chatJid: string, chatType: ChatType, bubbles: string[]): Promise<{ bubbleCount: number; sendMs: number }> {
     const sendStartedAt = Date.now();
 
     for (let index = 0; index < bubbles.length; index += 1) {
@@ -478,6 +497,7 @@ export class ChatRuntime {
         chatType,
         this.botJid,
         sent.externalId,
+        bubble,
         outboundText,
         sent.timestamp,
         this.runtimeContext.botConfig.blockSize

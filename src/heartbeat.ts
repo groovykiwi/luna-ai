@@ -42,6 +42,7 @@ export class HeartbeatService {
       persona: this.runtimeContext.persona,
       heartbeatInstructions: this.runtimeContext.heartbeatInstructions ?? "",
       botId: this.runtimeContext.botConfig.botId,
+      messagePrefix: this.runtimeContext.botConfig.messagePrefix,
       chatType: chat.type,
       recentWindow,
       retrievedMemoryBlock: formatRetrievedMemories(retrieval.memories),
