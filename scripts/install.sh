@@ -180,7 +180,7 @@ git clone --branch "$REPO_REF" --single-branch "$REPO_URL" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 ./scripts/init-bot.sh "$BOT_ID"
-chmod +x ./scripts/whatsapp-auth.sh || true
+chmod +x ./scripts/auth-setup.sh || true
 
 cat > .env <<EOF
 OPENROUTER_API_KEY=$OPENROUTER_API_KEY
@@ -214,17 +214,17 @@ if ensure_docker_available; then
     fi
   fi
 
-  if confirm_yes_no "Run WhatsApp authentication now?" "y"; then
-    if ./scripts/whatsapp-auth.sh --build-image; then
+  if confirm_yes_no "Run auth setup now?" "y"; then
+    if ./scripts/auth-setup.sh --build-image; then
       compose_needs_build=0
-      printf '\nWhatsApp authentication finished.\n'
+      printf '\nAuth setup finished.\n'
     else
-      printf '\nWhatsApp authentication did not complete.\n'
-      printf 'Retry later with: ./scripts/whatsapp-auth.sh\n'
+      printf '\nAuth setup did not complete.\n'
+      printf 'Retry later with: ./scripts/auth-setup.sh\n'
     fi
   else
-    printf '\nYou can authenticate later with: ./scripts/whatsapp-auth.sh\n'
-    printf 'Use a dry run with: ./scripts/whatsapp-auth.sh --demo\n'
+    printf '\nYou can run auth setup later with: ./scripts/auth-setup.sh\n'
+    printf 'For a WhatsApp QR dry run: ./scripts/auth-setup.sh --whatsapp --demo-whatsapp\n'
   fi
 
   if confirm_yes_no "Start Luna with docker compose now?" "y"; then
@@ -242,4 +242,4 @@ else
 fi
 
 printf '\nNext step: cd %s && docker compose up -d --build\n' "$INSTALL_DIR"
-printf 'WhatsApp auth later: cd %s && ./scripts/whatsapp-auth.sh\n' "$INSTALL_DIR"
+printf 'Auth setup later: cd %s && ./scripts/auth-setup.sh\n' "$INSTALL_DIR"

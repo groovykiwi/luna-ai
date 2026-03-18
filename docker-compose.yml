@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       BOT_PATH: /bot
     volumes:
       - ${BOT_HOST_PATH}:/bot
