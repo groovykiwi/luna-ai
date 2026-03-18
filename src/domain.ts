@@ -207,6 +207,7 @@ export interface ExtractionCandidate {
   id: number;
   senderJid: string;
   isFromBot: boolean;
+  contentType: ContentType;
   text: string | null;
   imageDescription: string | null;
   createdAt: string;

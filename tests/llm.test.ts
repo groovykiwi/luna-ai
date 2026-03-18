@@ -155,6 +155,67 @@ describe("openrouter gateway", () => {
     expect(body.messages[1]?.content).not.toContain("luna: 🌙");
   });
 
+  it("teaches the reply model how image context is represented and preserves image-only messages in the prompt", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: "all set"
+              }
+            }
+          ]
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json"
+          }
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const gateway = new OpenRouterGateway("test-key", "https://example.com", models);
+
+    await gateway.generateReply({
+      persona: "You are Luna.",
+      botId: "luna",
+      messagePrefix: "",
+      chatType: "dm",
+      recentWindow: [
+        makeStoredMessage({
+          externalId: "img-1",
+          contentType: "image",
+          text: "",
+          imageDescription: null
+        })
+      ],
+      retrievedMemoryBlock: "",
+      archiveFallbackBlock: "",
+      pendingMessages: [
+        makeStoredMessage({
+          id: 2,
+          externalId: "msg-2",
+          text: "what is in that photo?"
+        })
+      ],
+      adminSenders: []
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(request).toBeDefined();
+
+    const body = JSON.parse(String(request?.body ?? "{}")) as {
+      messages: Array<{ content: string }>;
+    };
+
+    expect(body.messages[0]?.content).toContain('Image attachments may appear inline as "[image] ..."');
+    expect(body.messages[0]?.content).toContain("Do not claim you cannot see or inspect images");
+    expect(body.messages[1]?.content).toContain("User: [image attached; description unavailable]");
+  });
+
   it("includes the provider response body in non-retryable errors", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ error: { message: "invalid api key", raw: "provider rejected the token" } }), {

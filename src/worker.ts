@@ -6,6 +6,7 @@ import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import type { Logger } from "./logging.js";
 import { MemoryService } from "./memory.js";
+import { formatMessageContent } from "./message-content.js";
 import { sleep } from "./utils.js";
 
 export class BackgroundWorker {
@@ -110,10 +111,11 @@ export class BackgroundWorker {
           .map((candidate) => ({
             senderJid: candidate.senderJid,
             isFromBot: candidate.isFromBot,
-            text: [candidate.text, candidate.imageDescription ? `[image] ${candidate.imageDescription}` : null]
-              .filter(Boolean)
-              .join(" ")
-              .trim()
+            text: formatMessageContent({
+              contentType: candidate.contentType,
+              text: candidate.text,
+              imageDescription: candidate.imageDescription
+            })
           }))
           .filter((candidate) => candidate.text);
 

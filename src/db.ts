@@ -969,7 +969,7 @@ export class LunaDb {
   getExtractionCandidates(blockId: number): ExtractionCandidate[] {
     const rows = this.connection
       .prepare(
-        `SELECT id, sender_jid AS senderJid, is_from_bot AS isFromBot, text, image_description AS imageDescription, created_at AS createdAt
+        `SELECT id, sender_jid AS senderJid, is_from_bot AS isFromBot, content_type AS contentType, text, image_description AS imageDescription, created_at AS createdAt
          FROM messages
          WHERE block_id = ? AND memory_eligible = 1
          ORDER BY id ASC`
@@ -980,6 +980,7 @@ export class LunaDb {
         id: Number(row.id),
         senderJid: String(row.senderJid),
         isFromBot: Number(row.isFromBot) === 1,
+        contentType: String(row.contentType) as ExtractionCandidate["contentType"],
         text: (row.text as string | null) ?? null,
         imageDescription: (row.imageDescription as string | null) ?? null,
         createdAt: String(row.createdAt)

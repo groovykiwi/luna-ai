@@ -2,6 +2,7 @@ import type { RuntimeContext, StoredMessage } from "./domain.js";
 import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import { formatArchiveHits, formatRetrievedMemories, MemoryService } from "./memory.js";
+import { formatMessageContent } from "./message-content.js";
 import { sanitizeGeneratedBubble } from "./output.js";
 import { chunkText } from "./utils.js";
 
@@ -84,7 +85,7 @@ export class ReplyService {
       .filter((message) => message.id < firstPendingMessageId)
       .slice(-this.runtimeContext.rootConfig.recentWindowMessageLimit);
     const turnQuery = pendingMessages
-      .map((message) => [message.text, message.imageDescription].filter(Boolean).join(" ").trim())
+      .map((message) => formatMessageContent(message))
       .filter(Boolean)
       .join("\n");
 

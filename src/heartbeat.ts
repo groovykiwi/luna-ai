@@ -2,6 +2,7 @@ import type { RuntimeContext, StoredMessage } from "./domain.js";
 import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import { formatArchiveHits, formatRetrievedMemories, MemoryService } from "./memory.js";
+import { formatMessageContent } from "./message-content.js";
 
 export class HeartbeatService {
   constructor(
@@ -33,7 +34,7 @@ export class HeartbeatService {
       .filter((message) => message.id < firstReviewMessageId)
       .slice(-this.runtimeContext.rootConfig.recentWindowMessageLimit);
     const reviewQuery = reviewMessages
-      .map((message) => [message.text, message.imageDescription].filter(Boolean).join(" ").trim())
+      .map((message) => formatMessageContent(message))
       .filter(Boolean)
       .join("\n");
 

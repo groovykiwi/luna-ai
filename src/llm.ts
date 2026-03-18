@@ -8,6 +8,7 @@ import type {
   StoredMessage
 } from "./domain.js";
 import type { Logger } from "./logging.js";
+import { formatMessageContent } from "./message-content.js";
 import { sanitizeGeneratedBubble } from "./output.js";
 import { sleep, tryParseJson } from "./utils.js";
 
@@ -120,7 +121,7 @@ export interface LanguageGateway {
 
 export function shouldUseStructuredReplyMode(pendingMessages: StoredMessage[]): boolean {
   const text = pendingMessages
-    .map((message) => [message.text, message.imageDescription].filter(Boolean).join(" ").trim())
+    .map((message) => formatMessageContent(message))
     .filter(Boolean)
     .join("\n");
 
@@ -194,6 +195,7 @@ export class OpenRouterGateway implements LanguageGateway {
               "- Do not use markdown fences or JSON.",
               "- Keep the response natural and human-sized for chat.",
               "- Use the speaker names and recent window to stay grounded in the actual conversation.",
+              ...buildImageContextRules(),
               ...buildRawReplyRules(input.botId, input.messagePrefix)
             ].join("\n")
           },
@@ -230,6 +232,7 @@ export class OpenRouterGateway implements LanguageGateway {
             "- If a non-admin asks to remember or forget something, decide if it is appropriate before adding memoryOperations.",
             "- Keep memoryOperations atomic and sparse. Use them only for explicit remember/forget actions.",
             "- Use the speaker names and recent window to stay grounded in the actual conversation.",
+            ...buildImageContextRules(),
             ...buildRawReplyRules(input.botId, input.messagePrefix)
           ].join("\n")
         },
@@ -282,6 +285,7 @@ export class OpenRouterGateway implements LanguageGateway {
             "- Keep memoryOperations atomic and sparse. Use them only for explicit remember/forget actions.",
             "- Stay selective. Do not jump into every conversation just because a heartbeat fired.",
             "- Use the speaker names and recent context to stay grounded in the real conversation.",
+            ...buildImageContextRules(),
             ...buildRawReplyRules(input.botId, input.messagePrefix)
           ].join("\n")
         },
@@ -691,10 +695,7 @@ function formatMessages(messages: StoredMessage[], botLabel: string, messagePref
       if (!message.isFromBot && message.wasTriggered) {
         prefixes.push("triggered");
       }
-      const rawText = [message.text, message.imageDescription ? `[image] ${message.imageDescription}` : null]
-        .filter(Boolean)
-        .join(" ")
-        .trim();
+      const rawText = formatMessageContent(message);
       const text = message.isFromBot
         ? sanitizeGeneratedBubble(rawText, {
             botId: botLabel,
@@ -705,6 +706,15 @@ function formatMessages(messages: StoredMessage[], botLabel: string, messagePref
       return `${prefix}${speaker}: ${text || "(empty)"}`;
     })
     .join("\n");
+}
+
+function buildImageContextRules(): string[] {
+  return [
+    '- Image attachments may appear inline as "[image] ..." when they were successfully described.',
+    '- Treat "[image] ..." text as grounded context about what was in the image, and answer naturally from it.',
+    '- If a message says "[image attached; description unavailable]", be honest that the image arrived but could not be inspected.',
+    "- Do not claim you cannot see or inspect images when an image description is already present in context."
+  ];
 }
 
 function buildRawReplyRules(botId: string, messagePrefix: string): string[] {
