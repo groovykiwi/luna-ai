@@ -62,7 +62,7 @@ The installer:
 ### Manual Docker Setup
 
 ```bash
-git clone git@github.com:groovykiwi/luna-ai.git
+git clone https://github.com/groovykiwi/luna-ai.git
 cd luna-ai
 cp .env.example .env
 # fill in OPENROUTER_API_KEY
@@ -150,6 +150,7 @@ At startup, `./scripts/auth-setup.sh`:
 - lets you switch to another bot folder before doing any auth work
 - writes the chosen `BOT_PATH` and `BOT_HOST_PATH` back into `.env` so local `pnpm` runs and Docker point at the same bot folder by default
 - prefers Docker Compose when available, otherwise falls back to local `pnpm`
+- bootstraps local `pnpm` dependencies automatically when Docker is unavailable and `node_modules` is missing
 
 Run the helper and choose interactively:
 
@@ -352,10 +353,14 @@ Each bot has its own folder under `bots/<bot-id>/`:
 - `persona.md`: the voice and behavioral rules
 - `heartbeat.md`: ambient participation instructions
 - `bot.json`: runtime configuration
-- `bot.db`: SQLite state, messages, blocks, jobs, and memory items
+- `bot.db`: SQLite state, normalized messages, archive search index, jobs, and memory items
 - `auth/`: WhatsApp session state (Telegram does not use it)
 - `media/`: downloaded inbound media
 - `logs/`: runtime logs
+
+`bot.db` contains real conversation content. Incoming provider payload JSON is stored short-term while a block is still being processed, then compacted after the block finishes. Message text, image descriptions, archive-search data, and memory embeddings remain in SQLite until you delete or migrate the bot state.
+
+Treat `bot.db`, `media/`, and `logs/` as sensitive user data when backing up, sharing, or moving a bot.
 
 This layout makes bots easy to back up, move, and inspect.
 
@@ -364,10 +369,11 @@ This layout makes bots easy to back up, move, and inspect.
 Requirements:
 
 - Node.js 22+
-- `corepack` / `pnpm`
+- `pnpm` (or `corepack` if you want Node to provision `pnpm`)
 - `git`
 
 ```bash
+# optional if pnpm is not installed already
 corepack enable
 pnpm install
 pnpm approve-builds --all
@@ -377,14 +383,18 @@ cp .env.example .env
 # BOT_HOST_PATH only matters for Docker; keep it the same for simplicity
 # set TELEGRAM_BOT_TOKEN for Telegram bots
 ./scripts/init-bot.sh maya
+pnpm doctor
 pnpm auth
+# terminal 1
 pnpm worker
+# terminal 2
 pnpm chat
 ```
 
 Useful local commands:
 
 - `pnpm auth`
+- `pnpm doctor`
 - `pnpm reauth`
 - `pnpm reinit`
 - `pnpm telegram-ids`
