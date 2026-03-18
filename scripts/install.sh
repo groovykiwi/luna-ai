@@ -180,6 +180,7 @@ git clone --branch "$REPO_REF" --single-branch "$REPO_URL" "$INSTALL_DIR"
 cd "$INSTALL_DIR"
 
 ./scripts/init-bot.sh "$BOT_ID"
+chmod +x ./scripts/whatsapp-auth.sh || true
 
 cat > .env <<EOF
 OPENROUTER_API_KEY=$OPENROUTER_API_KEY
@@ -195,6 +196,8 @@ printf 'Edit persona: %s\n' "bots/$BOT_ID/persona.md"
 printf 'Edit config: %s\n' "bots/$BOT_ID/bot.json"
 
 if ensure_docker_available; then
+  compose_needs_build=1
+
   if ! has_docker_compose; then
     printf '\nDocker installation finished, but the docker CLI or Compose plugin is still unavailable in this shell.\n'
     printf 'Open a new shell after the install completes, then run: docker compose up -d --build\n'
@@ -211,8 +214,25 @@ if ensure_docker_available; then
     fi
   fi
 
+  if confirm_yes_no "Run WhatsApp authentication now?" "y"; then
+    if ./scripts/whatsapp-auth.sh --build-image; then
+      compose_needs_build=0
+      printf '\nWhatsApp authentication finished.\n'
+    else
+      printf '\nWhatsApp authentication did not complete.\n'
+      printf 'Retry later with: ./scripts/whatsapp-auth.sh\n'
+    fi
+  else
+    printf '\nYou can authenticate later with: ./scripts/whatsapp-auth.sh\n'
+    printf 'Use a dry run with: ./scripts/whatsapp-auth.sh --demo\n'
+  fi
+
   if confirm_yes_no "Start Luna with docker compose now?" "y"; then
-    docker compose up -d --build
+    if [[ "$compose_needs_build" -eq 1 ]]; then
+      docker compose up -d --build
+    else
+      docker compose up -d
+    fi
     printf '\nLuna AI is starting.\n'
     printf 'Watch logs with: docker compose logs -f\n'
     exit 0
@@ -222,3 +242,4 @@ else
 fi
 
 printf '\nNext step: cd %s && docker compose up -d --build\n' "$INSTALL_DIR"
+printf 'WhatsApp auth later: cd %s && ./scripts/whatsapp-auth.sh\n' "$INSTALL_DIR"

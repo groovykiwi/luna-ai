@@ -20,23 +20,45 @@ resolve_entry() {
   exit 1
 }
 
-worker_entry="$(resolve_entry worker)"
-chat_entry="$(resolve_entry chat)"
+run_main() {
+  local worker_entry
+  local chat_entry
 
-node "$worker_entry" &
-worker_pid=$!
+  worker_entry="$(resolve_entry worker)"
+  chat_entry="$(resolve_entry chat)"
 
-node "$chat_entry" &
-chat_pid=$!
+  node "$worker_entry" &
+  worker_pid=$!
 
-shutdown() {
-  kill "$worker_pid" "$chat_pid" 2>/dev/null || true
-  wait "$worker_pid" "$chat_pid" 2>/dev/null || true
+  node "$chat_entry" &
+  chat_pid=$!
+
+  shutdown() {
+    kill "$worker_pid" "$chat_pid" 2>/dev/null || true
+    wait "$worker_pid" "$chat_pid" 2>/dev/null || true
+  }
+
+  trap shutdown INT TERM
+
+  wait -n "$worker_pid" "$chat_pid"
+  status=$?
+  shutdown
+  exit "$status"
 }
 
-trap shutdown INT TERM
+mode="${1:-run}"
+if [[ $# -gt 0 ]]; then
+  shift
+fi
 
-wait -n "$worker_pid" "$chat_pid"
-status=$?
-shutdown
-exit "$status"
+case "$mode" in
+  run)
+    run_main
+    ;;
+  auth|chat|worker)
+    exec node "$(resolve_entry "$mode")" "$@"
+    ;;
+  *)
+    exec "$mode" "$@"
+    ;;
+esac

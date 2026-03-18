@@ -10,6 +10,16 @@ const RECOVERABLE_EMPTY_STUB_PARAMETERS = new Set([
   Baileys.MISSING_KEYS_ERROR_TEXT
 ]);
 
+export function writeWhatsAppQr(qr: string, stdout: Pick<NodeJS.WriteStream, "write"> = process.stdout): void {
+  stdout.write(
+    "\nWhatsApp login required.\nOpen WhatsApp on your phone, then go to Linked Devices > Link a Device and scan this QR:\n\n"
+  );
+  qrcode.generate(qr, { small: true }, (rendered) => {
+    stdout.write(`${rendered}\n`);
+  });
+  stdout.write("\n");
+}
+
 function normalizeJid(value: string): string {
   const [localPart, domain] = value.split("@");
   if (!localPart || !domain) {
@@ -244,11 +254,7 @@ export class BaileysTransport implements ChatTransport {
       }
 
       if (typeof update.qr === "string" && update.qr.trim()) {
-        process.stdout.write(
-          "\nWhatsApp login required.\nOpen WhatsApp on your phone, then go to Linked Devices > Link a Device and scan this QR:\n\n"
-        );
-        qrcode.generate(update.qr, { small: true });
-        process.stdout.write("\n");
+        writeWhatsAppQr(update.qr, process.stdout);
         this.logger.info("whatsapp qr ready");
       }
 

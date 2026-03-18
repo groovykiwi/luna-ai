@@ -4,9 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "auth": "tsx src/bin/auth.ts",
     "build": "tsc -p tsconfig.json",
     "check": "tsc --noEmit -p tsconfig.json",
     "chat": "tsx src/bin/chat.ts",
+    "reauth": "tsx src/bin/auth.ts --reset",
+    "reinit": "tsx src/bin/auth.ts --reinit",
     "worker": "tsx src/bin/worker.ts",
     "test": "vitest run"
   },
