@@ -1,11 +1,11 @@
 import path from "node:path";
 
-import { BaileysTransport } from "../baileys.js";
 import { loadEnvironment } from "../config.js";
 import { LunaDb } from "../db.js";
 import { OpenRouterGateway } from "../llm.js";
 import { createLogger } from "../logging.js";
 import { loadRuntimeContext } from "../runtime.js";
+import { createTransport } from "../transports.js";
 import { ChatRuntime } from "../chat/runtime.js";
 
 async function main(): Promise<void> {
@@ -23,7 +23,7 @@ async function main(): Promise<void> {
     runtimeContext.botConfig.models,
     logger
   );
-  const transport = new BaileysTransport(runtimeContext.paths.authDir, logger);
+  const transport = createTransport(runtimeContext, environment, logger);
   const runtime = new ChatRuntime(runtimeContext, db, transport, gateway, logger);
 
   process.on("SIGINT", async () => {

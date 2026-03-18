@@ -15,6 +15,7 @@ const optionalNonEmptyString = z.preprocess((value) => {
 
 const EnvironmentSchema = z.object({
   OPENROUTER_API_KEY: optionalNonEmptyString,
+  TELEGRAM_BOT_TOKEN: optionalNonEmptyString,
   OPENROUTER_BASE_URL: z.preprocess((value) => {
     if (typeof value !== "string") {
       return value;
@@ -28,6 +29,7 @@ const EnvironmentSchema = z.object({
 
 export interface RuntimeEnvironment {
   openRouterApiKey: string | null;
+  telegramBotToken: string | null;
   botPath: string | null;
 }
 
@@ -58,6 +60,7 @@ export function loadEnvironment(): RuntimeEnvironment {
   const parsed = EnvironmentSchema.parse(process.env);
   return {
     openRouterApiKey: parsed.OPENROUTER_API_KEY ?? null,
+    telegramBotToken: parsed.TELEGRAM_BOT_TOKEN ?? null,
     botPath: parsed.BOT_PATH ?? null
   };
 }

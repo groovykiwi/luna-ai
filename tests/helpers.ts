@@ -55,6 +55,7 @@ export function createRuntimeContext(root: string): RuntimeContext {
     },
     botConfig: {
       botId: "maya",
+      provider: "whatsapp",
       triggerNames: ["maya"],
       admins: ["admin@s.whatsapp.net"],
       messagePrefix: "",

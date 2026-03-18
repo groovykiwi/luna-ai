@@ -125,4 +125,49 @@ describe("reply allowlist", () => {
       turnEligible: 1
     });
   });
+
+  it("allows threaded Telegram DMs when the base chat ID is allowlisted", async () => {
+    const root = createTempRoot();
+    roots.push(root);
+    const runtimeContext = createRuntimeContext(root);
+    runtimeContext.botConfig.provider = "telegram";
+    runtimeContext.botConfig.replyWhitelist.dms = ["tg:chat:12345"];
+
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const gateway = new FakeGateway();
+    const transport = new MockTransport("tg:user:42");
+    const logger = createLogger(`${runtimeContext.paths.logsDir}/reply-whitelist-telegram.log`, "reply-whitelist-telegram");
+    const runtime = new ChatRuntime(runtimeContext, db, transport, gateway, logger);
+    await runtime.start();
+
+    await transport.push(
+      makeIncomingMessage({
+        externalId: "telegram-thread-dm",
+        chatJid: "tg:chat:12345:thread:7",
+        senderJid: "tg:user:99",
+        text: "hello from a telegram topic"
+      })
+    );
+
+    await waitFor(() => {
+      expect(transport.sent).toHaveLength(1);
+    });
+
+    expect(transport.sent[0]).toEqual({
+      chatJid: "tg:chat:12345:thread:7",
+      text: "hi there"
+    });
+
+    const flags = db.connection
+      .prepare(
+        "SELECT context_only AS contextOnly, memory_eligible AS memoryEligible, turn_eligible AS turnEligible FROM messages WHERE external_id = 'telegram-thread-dm'"
+      )
+      .get() as { contextOnly: number; memoryEligible: number; turnEligible: number };
+
+    expect(flags).toEqual({
+      contextOnly: 0,
+      memoryEligible: 1,
+      turnEligible: 1
+    });
+  });
 });

@@ -1,6 +1,5 @@
-import { areJidsSameUser } from "@whiskeysockets/baileys";
-
 import type { TriggerDecision } from "../domain.js";
+import { areUserIdentifiersSame } from "../identifiers.js";
 import { escapeRegExp } from "../utils.js";
 
 function containsTriggerName(text: string, triggerNames: string[]): boolean {
@@ -47,7 +46,7 @@ export function detectTrigger(options: {
 
   if (
     options.mentions.some((mentionJid) =>
-      options.botJids.some((botJid) => areJidsSameUser(mentionJid, botJid))
+      options.botJids.some((botJid) => areUserIdentifiersSame(mentionJid, botJid))
     )
   ) {
     return {

@@ -3,6 +3,7 @@ export type ContentType = "text" | "image" | "system";
 export type BlockStatus = "open" | "queued" | "running" | "done" | "failed";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 export type JobType = "extract_block" | "reindex" | "prune_media";
+export type BotProvider = "whatsapp" | "telegram";
 export type MemoryCategory =
   | "person"
   | "preference"
@@ -28,6 +29,22 @@ export interface BotHeartbeatConfig {
   intervalMs?: number;
   randomIntervalMs?: [number, number];
   batchSize?: number;
+}
+
+export interface BotProviderFileConfig {
+  admins?: string[];
+  replyWhitelist?: BotReplyWhitelist;
+}
+
+export interface BotSharedFileConfig {
+  triggerNames?: string[];
+  messagePrefix?: string;
+  heartbeat?: BotHeartbeatConfig;
+  blockSize?: number;
+  bubbleDelayMs?: [number, number];
+  retrievalMinHits?: number;
+  models?: Partial<ModelLanes>;
+  retainProcessedMedia?: boolean;
 }
 
 export interface ResolvedReplyWhitelist {
@@ -60,22 +77,16 @@ export interface RootConfig {
   inlineForgetSearchLimit: number;
 }
 
-export interface BotFileConfig {
+export interface BotFileConfig extends BotSharedFileConfig {
   botId: string;
-  triggerNames: string[];
-  admins: string[];
-  messagePrefix?: string;
-  replyWhitelist?: BotReplyWhitelist;
-  heartbeat?: BotHeartbeatConfig;
-  blockSize?: number;
-  bubbleDelayMs?: [number, number];
-  retrievalMinHits?: number;
-  models?: Partial<ModelLanes>;
-  retainProcessedMedia?: boolean;
+  provider?: BotProvider;
+  whatsapp?: BotProviderFileConfig;
+  telegram?: BotProviderFileConfig;
 }
 
 export interface ResolvedBotConfig {
   botId: string;
+  provider: BotProvider;
   triggerNames: string[];
   admins: string[];
   messagePrefix: string;

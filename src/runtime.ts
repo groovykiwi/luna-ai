@@ -5,8 +5,10 @@ import { z } from "zod";
 
 import { loadEnvironment, rootConfig } from "./config.js";
 import type {
+  BotProvider,
   BotHeartbeatConfig,
   BotFileConfig,
+  BotProviderFileConfig,
   BotReplyWhitelist,
   ResolvedBotConfig,
   ResolvedHeartbeatConfig,
@@ -14,6 +16,7 @@ import type {
   RuntimeContext,
   RuntimePaths
 } from "./domain.js";
+import { normalizeIdentifier } from "./identifiers.js";
 
 const HeartbeatConfigSchema = z
   .object({
@@ -21,6 +24,7 @@ const HeartbeatConfigSchema = z
     randomIntervalMs: z.tuple([z.number().int().positive(), z.number().int().positive()]).optional(),
     batchSize: z.number().int().positive().optional()
   })
+  .strict()
   .superRefine((value, ctx) => {
     const scheduleCount = Number(value.intervalMs !== undefined) + Number(value.randomIntervalMs !== undefined);
     if (scheduleCount !== 1) {
@@ -38,31 +42,42 @@ const HeartbeatConfigSchema = z
     }
   });
 
-const BotConfigSchema = z.object({
-  botId: z.string().min(1),
-  triggerNames: z.array(z.string().min(1)).default([]),
+const ReplyWhitelistSchema = z
+  .object({
+    dms: z.array(z.string().min(1)).optional(),
+    groups: z.array(z.string().min(1)).optional()
+  })
+  .strict();
+
+const ProviderConfigSchema = z.object({
   admins: z.array(z.string().min(1)).default([]),
-  messagePrefix: z.string().optional(),
-  replyWhitelist: z
-    .object({
-      dms: z.array(z.string().min(1)).optional(),
-      groups: z.array(z.string().min(1)).optional()
-    })
-    .optional(),
-  heartbeat: HeartbeatConfigSchema.optional(),
-  blockSize: z.number().int().positive().optional(),
-  bubbleDelayMs: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).optional(),
-  retrievalMinHits: z.number().int().positive().optional(),
-  models: z
-    .object({
-      main: z.string().min(1).nullable().optional(),
-      extract: z.string().min(1).nullable().optional(),
-      vision: z.string().min(1).nullable().optional(),
-      embed: z.string().min(1).nullable().optional()
-    })
-    .optional(),
-  retainProcessedMedia: z.boolean().optional()
-});
+  replyWhitelist: ReplyWhitelistSchema.optional()
+}).strict();
+
+const BotConfigSchema = z
+  .object({
+    botId: z.string().min(1),
+    provider: z.enum(["whatsapp", "telegram"]).optional(),
+    triggerNames: z.array(z.string().min(1)).default([]),
+    messagePrefix: z.string().optional(),
+    heartbeat: HeartbeatConfigSchema.optional(),
+    blockSize: z.number().int().positive().optional(),
+    bubbleDelayMs: z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]).optional(),
+    retrievalMinHits: z.number().int().positive().optional(),
+    models: z
+      .object({
+        main: z.string().min(1).nullable().optional(),
+        extract: z.string().min(1).nullable().optional(),
+        vision: z.string().min(1).nullable().optional(),
+        embed: z.string().min(1).nullable().optional()
+      })
+      .strict()
+      .optional(),
+    retainProcessedMedia: z.boolean().optional(),
+    whatsapp: ProviderConfigSchema.optional(),
+    telegram: ProviderConfigSchema.optional()
+  })
+  .strict();
 
 function resolveBotPath(explicitBotPath: string | null): string {
   if (explicitBotPath) {
@@ -103,30 +118,29 @@ function hasRequiredBotFiles(botPath: string): boolean {
   }
 }
 
-function normalizeWhatsAppJid(value: string): string {
-  const trimmed = value.trim();
-  const [localPart, domain] = trimmed.split("@");
-  if (!localPart || !domain) {
-    return trimmed;
-  }
-
-  return `${localPart.split(":")[0]}@${domain}`;
-}
-
-function resolveWhitelistEntries(entries: string[] | undefined): string[] | null {
+function resolveIdentifierEntries(provider: BotProvider, entries: string[] | undefined): string[] | null {
   if (entries === undefined) {
     return null;
   }
 
-  return [...new Set(entries.map((value) => normalizeWhatsAppJid(value)).filter(Boolean))];
+  return [...new Set(entries.map((value) => normalizeIdentifier(provider, value)).filter(Boolean))];
 }
 
-function resolveReplyWhitelist(replyWhitelist: BotReplyWhitelist | undefined): ResolvedReplyWhitelist {
+function resolveReplyWhitelist(provider: BotProvider, replyWhitelist: BotReplyWhitelist | undefined): ResolvedReplyWhitelist {
   return {
     // Null means unrestricted for that chat type; an empty array means deny all.
-    dms: resolveWhitelistEntries(replyWhitelist?.dms),
-    groups: resolveWhitelistEntries(replyWhitelist?.groups)
+    dms: resolveIdentifierEntries(provider, replyWhitelist?.dms),
+    groups: resolveIdentifierEntries(provider, replyWhitelist?.groups)
   };
+}
+
+function selectProviderConfig(rawConfig: BotFileConfig, provider: BotProvider): BotProviderFileConfig {
+  const nestedConfig = provider === "telegram" ? rawConfig.telegram : rawConfig.whatsapp;
+  if (nestedConfig) {
+    return nestedConfig;
+  }
+
+  throw new Error(`bot.json must define a "${provider}" config block when provider is "${provider}".`);
 }
 
 function resolveHeartbeatConfig(
@@ -155,6 +169,8 @@ function resolveHeartbeatConfig(
 }
 
 function resolveBotConfig(rawConfig: BotFileConfig, heartbeatInstructions: string | null): ResolvedBotConfig {
+  const provider = rawConfig.provider ?? "whatsapp";
+  const selectedConfig = selectProviderConfig(rawConfig, provider);
   const bubbleDelayMs = rawConfig.bubbleDelayMs ?? [...rootConfig.defaultBubbleDelayMs];
   if (bubbleDelayMs[0] > bubbleDelayMs[1]) {
     throw new Error("bubbleDelayMs must be ordered as [min, max].");
@@ -162,10 +178,11 @@ function resolveBotConfig(rawConfig: BotFileConfig, heartbeatInstructions: strin
 
   return {
     botId: rawConfig.botId,
-    triggerNames: rawConfig.triggerNames.map((value) => value.trim()).filter(Boolean),
-    admins: [...new Set(rawConfig.admins)],
+    provider,
+    triggerNames: (rawConfig.triggerNames ?? []).map((value) => value.trim()).filter(Boolean),
+    admins: [...new Set((selectedConfig.admins ?? []).map((value) => normalizeIdentifier(provider, value)).filter(Boolean))],
     messagePrefix: rawConfig.messagePrefix ?? "",
-    replyWhitelist: resolveReplyWhitelist(rawConfig.replyWhitelist),
+    replyWhitelist: resolveReplyWhitelist(provider, selectedConfig.replyWhitelist),
     heartbeat: resolveHeartbeatConfig(rawConfig.heartbeat, heartbeatInstructions),
     blockSize: rawConfig.blockSize ?? rootConfig.defaultBlockSize,
     bubbleDelayMs,

@@ -72,6 +72,32 @@ describe("detectTrigger", () => {
     ).toBe("mention");
   });
 
+  it("matches Telegram mentions by exact identity only", () => {
+    expect(
+      detectTrigger({
+        chatType: "group",
+        isFromBot: false,
+        text: "hello there",
+        mentions: ["tg:user:42"],
+        botJids: ["tg:user:42"],
+        triggerNames: ["maya"],
+        isDirectReplyToBot: false
+      }).reason
+    ).toBe("mention");
+
+    expect(
+      detectTrigger({
+        chatType: "group",
+        isFromBot: false,
+        text: "hello there",
+        mentions: ["tg:user:42"],
+        botJids: ["tg:user:99"],
+        triggerNames: ["maya"],
+        isDirectReplyToBot: false
+      }).reason
+    ).toBeNull();
+  });
+
   it("ignores ambient group chatter", () => {
     expect(
       detectTrigger({

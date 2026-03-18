@@ -3,6 +3,7 @@ import type { Logger } from "../logging.js";
 import type { RuntimeContext } from "../domain.js";
 import type { LunaDb } from "../db.js";
 import { HeartbeatService } from "../heartbeat.js";
+import { isTelegramChatIdentifierMatch } from "../identifiers.js";
 import type { LanguageGateway } from "../llm.js";
 import type { ChatTransport } from "../transport.js";
 import { persistInboundImage } from "../media.js";
@@ -83,6 +84,10 @@ export class ChatRuntime {
 
     if (allowlist === null) {
       return true;
+    }
+
+    if (this.runtimeContext.botConfig.provider === "telegram") {
+      return allowlist.some((allowedChatJid) => isTelegramChatIdentifierMatch(allowedChatJid, chatJid));
     }
 
     return allowlist.includes(chatJid);
