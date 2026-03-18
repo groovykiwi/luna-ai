@@ -55,7 +55,7 @@ case "$mode" in
   run)
     run_main
     ;;
-  auth|chat|worker)
+  auth|chat|telegram-ids|whatsapp-ids|worker)
     exec node "$(resolve_entry "$mode")" "$@"
     ;;
   *)

@@ -10,6 +10,8 @@
     "chat": "tsx src/bin/chat.ts",
     "reauth": "tsx src/bin/auth.ts --reset",
     "reinit": "tsx src/bin/auth.ts --reinit",
+    "telegram-ids": "tsx src/bin/telegram-ids.ts",
+    "whatsapp-ids": "tsx src/bin/whatsapp-ids.ts",
     "worker": "tsx src/bin/worker.ts",
     "test": "vitest run"
   },
