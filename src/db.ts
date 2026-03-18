@@ -38,6 +38,7 @@ export interface IngestPayload {
   isFromBot: boolean;
   mediaFilePath?: string | null;
   mediaMimeType?: string | null;
+  mediaErrorMessage?: string | null;
 }
 
 export interface IngestResult {
@@ -55,6 +56,7 @@ export interface JobRow {
   payloadJson: string;
   attempts: number;
   errorMessage: string | null;
+  leaseToken: string | null;
 }
 
 interface RawStoredMessageRow {
@@ -79,17 +81,38 @@ interface RawStoredMessageRow {
   processedTurnAt: string | null;
 }
 
-const SCHEMA_VERSION = "2";
+const SCHEMA_VERSION = "3";
+const COMPACTED_RAW_JSON = "{\"compacted\":true}";
+
+export class LunaDbOpenError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "LunaDbOpenError";
+  }
+}
 
 export class LunaDb {
   readonly connection: Database.Database;
 
   constructor(dbPath: string, busyTimeoutMs: number) {
-    this.connection = new Database(dbPath);
-    this.connection.pragma("journal_mode = WAL");
-    this.connection.pragma(`busy_timeout = ${busyTimeoutMs}`);
-    this.connection.pragma("foreign_keys = ON");
-    this.migrate();
+    let connection: Database.Database | null = null;
+
+    try {
+      connection = new Database(dbPath);
+      connection.pragma("journal_mode = WAL");
+      connection.pragma(`busy_timeout = ${busyTimeoutMs}`);
+      connection.pragma("foreign_keys = ON");
+      this.connection = connection;
+      this.verifyIntegrity();
+      this.migrate();
+    } catch (error) {
+      try {
+        connection?.close();
+      } catch {
+        // Best-effort cleanup only.
+      }
+      throw toLunaDbOpenError(dbPath, error);
+    }
   }
 
   close(): void {
@@ -188,6 +211,7 @@ export class LunaDb {
         error_message TEXT,
         available_at TEXT NOT NULL,
         started_at TEXT,
+        lease_token TEXT,
         finished_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -209,6 +233,7 @@ export class LunaDb {
 
       CREATE INDEX IF NOT EXISTS idx_messages_chat_created ON messages(chat_id, created_at);
       CREATE INDEX IF NOT EXISTS idx_messages_turn_queue ON messages(turn_eligible, processed_turn_at, is_from_bot, chat_id, id);
+      CREATE INDEX IF NOT EXISTS idx_messages_turn_lock ON messages(turn_eligible, processed_turn_at, turn_locked_at, chat_id, id);
       CREATE INDEX IF NOT EXISTS idx_blocks_chat_status ON blocks(chat_id, status, id);
       CREATE INDEX IF NOT EXISTS idx_jobs_status_available ON jobs(status, available_at, id);
       CREATE INDEX IF NOT EXISTS idx_memory_items_status ON memory_items(status, updated_at);
@@ -242,6 +267,10 @@ export class LunaDb {
       this.connection.exec("ALTER TABLE chats ADD COLUMN last_reviewed_message_id INTEGER REFERENCES messages(id)");
     }
 
+    if (!this.hasColumn("jobs", "lease_token")) {
+      this.connection.exec("ALTER TABLE jobs ADD COLUMN lease_token TEXT");
+    }
+
     const now = new Date().toISOString();
     this.connection
       .prepare(
@@ -250,6 +279,13 @@ export class LunaDb {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
       )
       .run(SCHEMA_VERSION, now);
+  }
+
+  private verifyIntegrity(): void {
+    const quickCheck = this.connection.prepare("PRAGMA quick_check").pluck().get() as string | undefined;
+    if (quickCheck && quickCheck !== "ok") {
+      throw new Error(`PRAGMA quick_check reported ${quickCheck}`);
+    }
   }
 
   private hasColumn(tableName: string, columnName: string): boolean {
@@ -375,14 +411,15 @@ export class LunaDb {
         const mediaInsert = this.connection
           .prepare(
             `INSERT INTO media(message_id, file_path, mime_type, status, description, error_message, created_at, updated_at, pruned_at)
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL)`
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`
           )
           .run(
             messageId,
             payload.mediaFilePath,
             payload.mediaMimeType,
-            payload.imageDescription ? "described" : "downloaded",
+            payload.mediaErrorMessage ? "failed" : (payload.imageDescription ? "described" : "downloaded"),
             payload.imageDescription,
+            payload.mediaErrorMessage ?? null,
             payload.createdAt,
             payload.createdAt
           );
@@ -441,80 +478,115 @@ export class LunaDb {
     return Number(result.lastInsertRowid);
   }
 
-  reclaimRunningJobs(now: string): number {
+  reclaimRunningJobs(now: string, staleBefore: string): number {
     const result = this.connection
       .prepare(
         `UPDATE jobs
          SET status = 'queued',
              updated_at = ?,
-             started_at = NULL
-         WHERE status = 'running'`
+             started_at = NULL,
+             lease_token = NULL
+         WHERE status = 'running'
+           AND (started_at IS NULL OR started_at <= ?)`
       )
-      .run(now);
+      .run(now, staleBefore);
 
     return result.changes;
   }
 
-  claimNextJob(now: string): JobRow | null {
+  claimNextJob(now: string, leaseToken: string): JobRow | null {
     const transaction = this.connection.transaction(() => {
-      const row = this.connection
-        .prepare(
-          `SELECT id, type, status, payload_json AS payloadJson, attempts, error_message AS errorMessage
-           FROM jobs
-           WHERE status = 'queued' AND available_at <= ?
-           ORDER BY id ASC
-           LIMIT 1`
-        )
-        .get(now) as JobRow | undefined;
+      while (true) {
+        const row = this.connection
+          .prepare(
+            `SELECT id, type, status, payload_json AS payloadJson, attempts, error_message AS errorMessage, lease_token AS leaseToken
+             FROM jobs
+             WHERE status = 'queued' AND available_at <= ?
+             ORDER BY id ASC
+             LIMIT 1`
+          )
+          .get(now) as JobRow | undefined;
 
-      if (!row) {
-        return null;
+        if (!row) {
+          return null;
+        }
+
+        const claimed = this.connection
+          .prepare(
+            `UPDATE jobs
+             SET status = 'running',
+                 attempts = attempts + 1,
+                 started_at = ?,
+                 lease_token = ?,
+                 updated_at = ?
+             WHERE id = ?
+               AND status = 'queued'
+               AND available_at <= ?`
+          )
+          .run(now, leaseToken, now, row.id, now);
+
+        if (claimed.changes === 1) {
+          return {
+            ...row,
+            status: "running",
+            attempts: row.attempts + 1,
+            leaseToken
+          } satisfies JobRow;
+        }
       }
-
-      this.connection
-        .prepare(
-          `UPDATE jobs
-           SET status = 'running',
-               attempts = attempts + 1,
-               started_at = ?,
-               updated_at = ?
-           WHERE id = ?`
-        )
-        .run(now, now, row.id);
-
-      return {
-        ...row,
-        status: "running",
-        attempts: row.attempts + 1
-      } satisfies JobRow;
     });
 
-    return transaction();
+    return transaction.immediate();
   }
 
-  completeJob(jobId: number, now: string): void {
-    this.connection
+  completeJob(jobId: number, leaseToken: string, now: string): boolean {
+    const result = this.connection
       .prepare(
         `UPDATE jobs
          SET status = 'done',
              finished_at = ?,
+             lease_token = NULL,
              updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?
+           AND status = 'running'
+           AND lease_token = ?`
       )
-      .run(now, now, jobId);
+      .run(now, now, jobId, leaseToken);
+
+    return result.changes === 1;
   }
 
-  failJob(jobId: number, now: string, errorMessage: string): void {
-    this.connection
+  failJob(jobId: number, leaseToken: string, now: string, errorMessage: string): boolean {
+    const result = this.connection
       .prepare(
         `UPDATE jobs
          SET status = 'failed',
              error_message = ?,
              finished_at = ?,
+             lease_token = NULL,
              updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?
+           AND status = 'running'
+           AND lease_token = ?`
       )
-      .run(errorMessage, now, now, jobId);
+      .run(errorMessage, now, now, jobId, leaseToken);
+
+    return result.changes === 1;
+  }
+
+  stillOwnsJobLease(jobId: number, leaseToken: string): boolean {
+    const row = this.connection
+      .prepare(
+        `SELECT 1
+         FROM jobs
+         WHERE id = ?
+           AND status = 'running'
+           AND lease_token = ?
+         LIMIT 1`
+      )
+      .get(jobId, leaseToken) as { 1: number } | undefined;
+
+    return Boolean(row);
   }
 
   markBlockStatus(blockId: number, status: BlockStatus, now: string, errorMessage?: string | null): void {
@@ -655,6 +727,56 @@ export class LunaDb {
     return rows.map((row) => this.mapStoredMessageRow(row));
   }
 
+  claimPendingTurnMessages(chatId: number, lockedAt: string): StoredMessage[] {
+    const transaction = this.connection.transaction(() => {
+      const rows = this.connection
+        .prepare(
+          `SELECT
+             id,
+             chat_id AS chatId,
+             block_id AS blockId,
+             external_id AS externalId,
+             sender_jid AS senderJid,
+             sender_name AS senderName,
+             is_from_bot AS isFromBot,
+             chat_type AS chatType,
+             context_only AS contextOnly,
+             memory_eligible AS memoryEligible,
+             was_triggered AS wasTriggered,
+             turn_eligible AS turnEligible,
+             content_type AS contentType,
+             text,
+             image_description AS imageDescription,
+             quoted_external_id AS quotedExternalId,
+             mentions_json AS mentionsJson,
+             created_at AS createdAt,
+             processed_turn_at AS processedTurnAt
+           FROM messages
+           WHERE chat_id = ?
+             AND turn_eligible = 1
+             AND processed_turn_at IS NULL
+             AND turn_locked_at IS NULL
+             AND is_from_bot = 0
+           ORDER BY id ASC`
+        )
+        .all(chatId) as RawStoredMessageRow[];
+
+      if (rows.length === 0) {
+        return [];
+      }
+
+      const messageIds = rows.map((row) => row.id);
+      const placeholders = messageIds.map(() => "?").join(", ");
+      this.connection
+        .prepare(`UPDATE messages SET turn_locked_at = ? WHERE id IN (${placeholders})`)
+        .run(lockedAt, ...messageIds);
+
+      return rows.map((row) => this.mapStoredMessageRow(row));
+    });
+
+    return transaction.immediate();
+  }
+
   getHeartbeatReviewMessages(chatId: number, limit: number): StoredMessage[] {
     const rows = this.connection
       .prepare(
@@ -697,8 +819,33 @@ export class LunaDb {
 
     const placeholders = messageIds.map(() => "?").join(", ");
     this.connection
-      .prepare(`UPDATE messages SET processed_turn_at = ? WHERE id IN (${placeholders})`)
+      .prepare(`UPDATE messages SET processed_turn_at = ?, turn_locked_at = NULL WHERE id IN (${placeholders})`)
       .run(now, ...messageIds);
+  }
+
+  unlockTurnMessages(messageIds: number[]): void {
+    if (messageIds.length === 0) {
+      return;
+    }
+
+    const placeholders = messageIds.map(() => "?").join(", ");
+    this.connection
+      .prepare(`UPDATE messages SET turn_locked_at = NULL WHERE id IN (${placeholders})`)
+      .run(...messageIds);
+  }
+
+  releaseStaleTurnLocks(staleBefore: string): number {
+    const result = this.connection
+      .prepare(
+        `UPDATE messages
+         SET turn_locked_at = NULL
+         WHERE processed_turn_at IS NULL
+           AND turn_locked_at IS NOT NULL
+           AND turn_locked_at <= ?`
+      )
+      .run(staleBefore);
+
+    return result.changes;
   }
 
   markChatReviewedThrough(chatId: number, messageId: number, now: string): void {
@@ -916,8 +1063,37 @@ export class LunaDb {
       .all() as MemoryItem[];
   }
 
-  searchActiveMemoriesByEmbedding(queryEmbedding: number[], limit: number): RetrievedMemory[] {
-    const memories = this.listActiveMemories().filter((memory) => memory.embedding);
+  findActiveMemoryByNormalizedKey(
+    category: MemoryCategory,
+    normalizedSummary: string,
+    normalizedDetails: string
+  ): Pick<MemoryItem, "id" | "category" | "summary" | "details"> | null {
+    const row = this.connection
+      .prepare(
+        `SELECT id, category, summary, details
+         FROM memory_items
+         WHERE status = 'active'
+           AND category = ?
+           AND trim(lower(summary)) = ?
+           AND trim(lower(coalesce(details, ''))) = ?
+         LIMIT 1`
+      )
+      .get(category, normalizedSummary, normalizedDetails) as Pick<MemoryItem, "id" | "category" | "summary" | "details"> | undefined;
+
+    return row ?? null;
+  }
+
+  searchActiveMemoriesByEmbedding(queryEmbedding: number[], limit: number, candidateLimit: number): RetrievedMemory[] {
+    const memories = this.connection
+      .prepare(
+        `SELECT id, category, summary, details, embedding
+         FROM memory_items
+         WHERE status = 'active'
+           AND embedding IS NOT NULL
+         ORDER BY updated_at DESC
+         LIMIT ?`
+      )
+      .all(candidateLimit) as Array<Pick<MemoryItem, "id" | "category" | "summary" | "details" | "embedding">>;
 
     return memories
       .map((memory) => ({
@@ -1006,10 +1182,23 @@ export class LunaDb {
          FROM media
          JOIN messages ON messages.id = media.message_id
          JOIN blocks ON blocks.id = messages.block_id
-         WHERE media.status = 'described'
-           AND blocks.status = 'done'`
+         WHERE media.status IN ('described', 'failed')
+           AND blocks.status IN ('done', 'failed')`
       )
       .all() as Array<{ id: number; filePath: string }>;
+  }
+
+  compactRawPayloadsForBlock(blockId: number): number {
+    const result = this.connection
+      .prepare(
+        `UPDATE messages
+         SET raw_json = ?
+         WHERE block_id = ?
+           AND raw_json != ?`
+      )
+      .run(COMPACTED_RAW_JSON, blockId, COMPACTED_RAW_JSON);
+
+    return result.changes;
   }
 
   markMediaPruned(mediaId: number, now: string): void {
@@ -1023,6 +1212,27 @@ export class LunaDb {
       )
       .run(now, now, mediaId);
   }
+}
+
+function toLunaDbOpenError(dbPath: string, cause: unknown): LunaDbOpenError {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const normalized = detail.toLowerCase();
+  const isCorruptionLike =
+    normalized.includes("file is not a database") ||
+    normalized.includes("database disk image is malformed") ||
+    normalized.includes("malformed");
+
+  if (isCorruptionLike) {
+    return new LunaDbOpenError(
+      `SQLite database at ${dbPath} appears corrupt or unreadable. Restore bot.db from a backup, or move/remove it to let Luna create a fresh database. Original error: ${detail}`,
+      { cause }
+    );
+  }
+
+  return new LunaDbOpenError(
+    `Unable to open SQLite database at ${dbPath}. Check file permissions, free disk space, and the parent directory. Original error: ${detail}`,
+    { cause }
+  );
 }
 
 export function encodeEmbedding(values: number[]): Buffer {

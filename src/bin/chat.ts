@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import { loadEnvironment } from "../config.js";
-import { LunaDb } from "../db.js";
+import { LunaDb, LunaDbOpenError } from "../db.js";
 import { OpenRouterGateway } from "../llm.js";
 import { createLogger } from "../logging.js";
 import { loadRuntimeContext } from "../runtime.js";
@@ -21,7 +21,12 @@ async function main(): Promise<void> {
     environment.openRouterApiKey,
     runtimeContext.rootConfig.openRouterBaseUrl,
     runtimeContext.botConfig.models,
-    logger
+    logger,
+    {
+      timeoutMs: runtimeContext.rootConfig.openRouterRequestTimeoutMs,
+      maxRetries: runtimeContext.rootConfig.openRouterMaxRetries,
+      retryBaseDelayMs: runtimeContext.rootConfig.openRouterRetryBaseDelayMs
+    }
   );
   const transport = createTransport(runtimeContext, environment, logger);
   const runtime = new ChatRuntime(runtimeContext, db, transport, gateway, logger);
@@ -42,7 +47,10 @@ async function main(): Promise<void> {
 }
 
 void main().catch((error) => {
-  const message = error instanceof Error ? error.stack ?? error.message : String(error);
+  const message =
+    error instanceof LunaDbOpenError
+      ? error.message
+      : error instanceof Error ? error.stack ?? error.message : String(error);
   process.stderr.write(`${message}\n`);
   process.exit(1);
 });

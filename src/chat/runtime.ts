@@ -16,6 +16,10 @@ import { TurnQueue } from "./queue.js";
 export class ChatRuntime {
   private static readonly typingRefreshMs = 8_000;
 
+  private static readonly turnRetryInitialMs = 500;
+
+  private static readonly turnRetryMaxMs = 30_000;
+
   private readonly memoryService: MemoryService;
 
   private readonly replyService: ReplyService;
@@ -29,6 +33,10 @@ export class ChatRuntime {
   private botIdentityJids: string[] = [];
 
   private heartbeatTimer: NodeJS.Timeout | null = null;
+
+  private readonly turnRetryTimers = new Map<number, NodeJS.Timeout>();
+
+  private readonly turnRetryDelayMs = new Map<number, number>();
 
   private heartbeatRunning = false;
 
@@ -44,12 +52,28 @@ export class ChatRuntime {
     this.memoryService = new MemoryService(db, gateway, runtimeContext.botConfig.retrievalMinHits);
     this.replyService = new ReplyService(db, gateway, this.memoryService, runtimeContext);
     this.heartbeatService = new HeartbeatService(db, gateway, this.memoryService, runtimeContext);
-    this.queue = new TurnQueue(async (chatId) => this.processTurn(chatId));
+    this.queue = new TurnQueue(
+      async (chatId) => this.processTurn(chatId),
+      (chatId, error) => {
+        this.logger.error("turn queue handler failed", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    );
   }
 
   async start(): Promise<void> {
     const { botJid, botIdentityJids } = await this.transport.start(async (message) => {
-      await this.handleInboundMessage(message);
+      try {
+        await this.handleInboundMessage(message);
+      } catch (error) {
+        this.logger.error("failed to process inbound message", {
+          externalId: message.externalId,
+          chatJid: message.chatJid,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     });
 
     this.botJid = botJid;
@@ -59,6 +83,15 @@ export class ChatRuntime {
       botIdentityJids,
       botId: this.runtimeContext.botConfig.botId
     });
+
+    const staleTurnLocks = this.db.releaseStaleTurnLocks(
+      new Date(Date.now() - this.runtimeContext.rootConfig.staleJobAfterMs).toISOString()
+    );
+    if (staleTurnLocks > 0) {
+      this.logger.warn("released stale turn locks", {
+        count: staleTurnLocks
+      });
+    }
 
     for (const chatId of this.db.listChatsWithPendingTurns()) {
       this.queue.enqueue(chatId);
@@ -73,6 +106,11 @@ export class ChatRuntime {
       clearTimeout(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+    for (const timer of this.turnRetryTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.turnRetryTimers.clear();
+    this.turnRetryDelayMs.clear();
     await this.transport.stop();
   }
 
@@ -109,6 +147,7 @@ export class ChatRuntime {
 
     let mediaFilePath: string | null = null;
     let imageDescription: string | null = null;
+    let mediaErrorMessage: string | null = null;
     if (message.image) {
       mediaFilePath = persistInboundImage(
         this.runtimeContext.paths.mediaDir,
@@ -123,9 +162,10 @@ export class ChatRuntime {
           caption: message.image.caption
         });
       } catch (error) {
+        mediaErrorMessage = error instanceof Error ? error.message : String(error);
         this.logger.warn("vision description failed", {
           externalId: message.externalId,
-          error: error instanceof Error ? error.message : String(error)
+          error: mediaErrorMessage
         });
       }
     }
@@ -147,7 +187,8 @@ export class ChatRuntime {
         createdAt: message.timestamp,
         isFromBot: false,
         mediaFilePath,
-        mediaMimeType: message.image?.mimeType ?? null
+        mediaMimeType: message.image?.mimeType ?? null,
+        mediaErrorMessage
       },
       {
         contextOnly,
@@ -178,79 +219,107 @@ export class ChatRuntime {
   }
 
   private async processTurn(chatId: number): Promise<boolean> {
-    const turnStartedAt = Date.now();
-    const pendingMessages = this.db.getPendingTurnMessages(chatId);
-    if (pendingMessages.length === 0) {
-      return false;
-    }
+    this.clearTurnRetry(chatId);
+    let pendingMessages: ReturnType<LunaDb["getPendingTurnMessages"]> = [];
 
-    const chat = this.db.getChatById(chatId);
-    if (!chat) {
-      return false;
-    }
-
-    if (!this.isReplyAllowed(chat.jid, chat.type)) {
-      const reviewedAt = new Date().toISOString();
-      this.logger.info("skipping pending turn for non-allowlisted chat", {
-        chatId,
-        chatJid: chat.jid,
-        chatType: chat.type
-      });
-      this.db.markTurnMessagesProcessed(
-        pendingMessages.map((message) => message.id),
-        reviewedAt
-      );
-      const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
-      if (lastPendingMessage) {
-        this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, reviewedAt);
+    try {
+      const turnStartedAt = Date.now();
+      pendingMessages = this.db.claimPendingTurnMessages(chatId, new Date().toISOString());
+      if (pendingMessages.length === 0) {
+        this.turnRetryDelayMs.delete(chatId);
+        return false;
       }
-      return this.db.getPendingTurnMessages(chatId).length > 0;
-    }
 
-    return this.runWithTypingPresence(chat.jid, async () => {
-      const generationStartedAt = Date.now();
-      const generated = await this.replyService.generateForTurn(chatId, pendingMessages);
-      const generationMs = Date.now() - generationStartedAt;
-      const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
-      if (splitReplyIntoBubbles(generated.reply).length === 0) {
+      const chat = this.db.getChatById(chatId);
+      if (!chat) {
+        this.db.unlockTurnMessages(pendingMessages.map((message) => message.id));
+        this.turnRetryDelayMs.delete(chatId);
+        return false;
+      }
+
+      if (!this.isReplyAllowed(chat.jid, chat.type)) {
+        const reviewedAt = new Date().toISOString();
+        this.logger.info("skipping pending turn for non-allowlisted chat", {
+          chatId,
+          chatJid: chat.jid,
+          chatType: chat.type
+        });
         this.db.markTurnMessagesProcessed(
           pendingMessages.map((message) => message.id),
-          generated.memoryAppliedAt
+          reviewedAt
         );
+        const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
         if (lastPendingMessage) {
-          this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, generated.memoryAppliedAt);
+          this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, reviewedAt);
         }
-        this.logger.info("completed turn without outbound bubbles", {
-          chatId,
-          pendingMessageCount: pendingMessages.length,
-          generationMs,
-          totalMs: Date.now() - turnStartedAt
-        });
+        this.turnRetryDelayMs.delete(chatId);
         return this.db.getPendingTurnMessages(chatId).length > 0;
       }
 
-      const sent = await this.sendReply(chat.jid, chat.type, generated.reply);
-      const completedAt = new Date().toISOString();
+      const hasMore = await this.runWithTypingPresence(chat.jid, async () => {
+        const generationStartedAt = Date.now();
+        const generated = await this.replyService.generateForTurn(chatId, pendingMessages);
+        const generationMs = Date.now() - generationStartedAt;
+        const lastPendingMessage = pendingMessages[pendingMessages.length - 1];
+        if (splitReplyIntoBubbles(generated.reply).length === 0) {
+          this.db.markTurnMessagesProcessed(
+            pendingMessages.map((message) => message.id),
+            generated.memoryAppliedAt
+          );
+          if (lastPendingMessage) {
+            this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, generated.memoryAppliedAt);
+          }
+          this.logger.info("completed turn without outbound bubbles", {
+            chatId,
+            pendingMessageCount: pendingMessages.length,
+            generationMs,
+            totalMs: Date.now() - turnStartedAt
+          });
+          return this.db.getPendingTurnMessages(chatId).length > 0;
+        }
 
-      this.db.markTurnMessagesProcessed(
-        pendingMessages.map((message) => message.id),
-        completedAt
-      );
-      if (lastPendingMessage) {
-        this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, completedAt);
-      }
+        const sent = await this.sendReply(chat.jid, chat.type, generated.reply);
+        const completedAt = new Date().toISOString();
 
-      this.logger.info("completed turn", {
-        chatId,
-        pendingMessageCount: pendingMessages.length,
-        bubbleCount: sent.bubbleCount,
-        generationMs,
-        sendMs: sent.sendMs,
-        totalMs: Date.now() - turnStartedAt
+        this.db.markTurnMessagesProcessed(
+          pendingMessages.map((message) => message.id),
+          completedAt
+        );
+        if (lastPendingMessage) {
+          this.db.markChatReviewedThrough(chatId, lastPendingMessage.id, completedAt);
+        }
+
+        this.logger.info("completed turn", {
+          chatId,
+          pendingMessageCount: pendingMessages.length,
+          bubbleCount: sent.bubbleCount,
+          generationMs,
+          sendMs: sent.sendMs,
+          totalMs: Date.now() - turnStartedAt
+        });
+
+        return this.db.getPendingTurnMessages(chatId).length > 0;
       });
 
-      return this.db.getPendingTurnMessages(chatId).length > 0;
-    });
+      this.turnRetryDelayMs.delete(chatId);
+      return hasMore;
+    } catch (error) {
+      this.db.unlockTurnMessages(pendingMessages.map((message) => message.id));
+      const pendingCount = this.db.getPendingTurnMessages(chatId).length;
+      this.logger.error("turn failed", {
+        chatId,
+        pendingMessageCount: pendingCount,
+        error: error instanceof Error ? error.message : String(error)
+      });
+
+      if (pendingCount > 0) {
+        this.scheduleTurnRetry(chatId);
+      } else {
+        this.turnRetryDelayMs.delete(chatId);
+      }
+
+      return false;
+    }
   }
 
   private scheduleNextHeartbeat(): void {
@@ -425,5 +494,36 @@ export class ChatRuntime {
       bubbleCount: bubbles.length,
       sendMs: Date.now() - sendStartedAt
     };
+  }
+
+  private clearTurnRetry(chatId: number): void {
+    const timer = this.turnRetryTimers.get(chatId);
+    if (!timer) {
+      return;
+    }
+
+    clearTimeout(timer);
+    this.turnRetryTimers.delete(chatId);
+  }
+
+  private scheduleTurnRetry(chatId: number): void {
+    if (this.stopping || this.turnRetryTimers.has(chatId)) {
+      return;
+    }
+
+    const delayMs = this.turnRetryDelayMs.get(chatId) ?? ChatRuntime.turnRetryInitialMs;
+    const timer = setTimeout(() => {
+      this.turnRetryTimers.delete(chatId);
+      this.queue.enqueue(chatId);
+    }, delayMs);
+    timer.unref?.();
+
+    this.turnRetryTimers.set(chatId, timer);
+    this.turnRetryDelayMs.set(chatId, Math.min(delayMs * 2, ChatRuntime.turnRetryMaxMs));
+
+    this.logger.warn("scheduled turn retry", {
+      chatId,
+      delayMs
+    });
   }
 }

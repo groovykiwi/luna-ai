@@ -46,6 +46,7 @@ export const rootConfig: RootConfig = {
   defaultRetrievalMinHits: 3,
   defaultHeartbeatBatchSize: 8,
   memorySearchLimit: 5,
+  memorySearchCandidateLimit: 512,
   rawArchiveSearchLimit: 5,
   recentWindowBlockLimit: 2,
   recentWindowMessageLimit: 24,
@@ -53,7 +54,10 @@ export const rootConfig: RootConfig = {
   workerPollIntervalMs: 2500,
   staleJobAfterMs: 10 * 60 * 1000,
   bubbleTypingBaseMs: 275,
-  inlineForgetSearchLimit: 5
+  inlineForgetSearchLimit: 5,
+  openRouterRequestTimeoutMs: 20_000,
+  openRouterMaxRetries: 2,
+  openRouterRetryBaseDelayMs: 500
 };
 
 export function loadEnvironment(): RuntimeEnvironment {

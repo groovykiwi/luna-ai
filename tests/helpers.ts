@@ -44,6 +44,7 @@ export function createRuntimeContext(root: string): RuntimeContext {
       defaultRetrievalMinHits: 3,
       defaultHeartbeatBatchSize: 8,
       memorySearchLimit: 5,
+      memorySearchCandidateLimit: 64,
       rawArchiveSearchLimit: 5,
       recentWindowBlockLimit: 2,
       recentWindowMessageLimit: 24,
@@ -51,7 +52,10 @@ export function createRuntimeContext(root: string): RuntimeContext {
       workerPollIntervalMs: 5,
       staleJobAfterMs: 60_000,
       bubbleTypingBaseMs: 0,
-      inlineForgetSearchLimit: 5
+      inlineForgetSearchLimit: 5,
+      openRouterRequestTimeoutMs: 1_000,
+      openRouterMaxRetries: 1,
+      openRouterRetryBaseDelayMs: 1
     },
     botConfig: {
       botId: "maya",

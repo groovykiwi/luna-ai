@@ -67,6 +67,7 @@ export interface RootConfig {
   defaultRetrievalMinHits: number;
   defaultHeartbeatBatchSize: number;
   memorySearchLimit: number;
+  memorySearchCandidateLimit: number;
   rawArchiveSearchLimit: number;
   recentWindowBlockLimit: number;
   recentWindowMessageLimit: number;
@@ -75,6 +76,9 @@ export interface RootConfig {
   staleJobAfterMs: number;
   bubbleTypingBaseMs: number;
   inlineForgetSearchLimit: number;
+  openRouterRequestTimeoutMs: number;
+  openRouterMaxRetries: number;
+  openRouterRetryBaseDelayMs: number;
 }
 
 export interface BotFileConfig extends BotSharedFileConfig {

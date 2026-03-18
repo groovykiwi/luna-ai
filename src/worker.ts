@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { unlinkSync } from "node:fs";
 
 import type { RuntimeContext } from "./domain.js";
@@ -9,6 +10,8 @@ import { sleep } from "./utils.js";
 
 export class BackgroundWorker {
   private readonly memoryService: MemoryService;
+
+  private readonly workerLeaseToken = randomUUID();
 
   private running = true;
 
@@ -22,7 +25,11 @@ export class BackgroundWorker {
   }
 
   initialize(): number {
-    const reclaimed = this.db.reclaimRunningJobs(new Date().toISOString());
+    const now = new Date();
+    const reclaimed = this.db.reclaimRunningJobs(
+      now.toISOString(),
+      new Date(now.getTime() - this.runtimeContext.rootConfig.staleJobAfterMs).toISOString()
+    );
     if (reclaimed > 0) {
       this.logger.warn("reclaimed stale jobs", { count: reclaimed });
     }
@@ -44,28 +51,45 @@ export class BackgroundWorker {
   }
 
   async runOnce(): Promise<boolean> {
-    const job = this.db.claimNextJob(new Date().toISOString());
+    const job = this.db.claimNextJob(new Date().toISOString(), this.workerLeaseToken);
     if (!job) {
       return false;
     }
 
     try {
       await this.handleJob(job);
-      this.db.completeJob(job.id, new Date().toISOString());
+      if (!job.leaseToken || !this.db.completeJob(job.id, job.leaseToken, new Date().toISOString())) {
+        this.logger.warn("job lease was lost before completion", {
+          jobId: job.id,
+          type: job.type
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const stillOwnsLease = job.leaseToken ? this.db.stillOwnsJobLease(job.id, job.leaseToken) : false;
       if (job.type === "extract_block") {
         const payload = JSON.parse(job.payloadJson) as { blockId?: number };
-        if (payload.blockId) {
+        if (payload.blockId && stillOwnsLease) {
           this.db.markBlockStatus(payload.blockId, "failed", new Date().toISOString(), message);
+          this.db.compactRawPayloadsForBlock(payload.blockId);
+          if (!this.runtimeContext.botConfig.retainProcessedMedia) {
+            this.db.enqueueJob("prune_media", {}, new Date().toISOString());
+          }
         }
       }
-      this.db.failJob(job.id, new Date().toISOString(), message);
-      this.logger.error("job failed", {
-        jobId: job.id,
-        type: job.type,
-        error: message
-      });
+      if (!job.leaseToken || !this.db.failJob(job.id, job.leaseToken, new Date().toISOString(), message)) {
+        this.logger.warn("job lease was lost before failure could be recorded", {
+          jobId: job.id,
+          type: job.type,
+          error: message
+        });
+      } else {
+        this.logger.error("job failed", {
+          jobId: job.id,
+          type: job.type,
+          error: message
+        });
+      }
     }
 
     return true;
@@ -95,6 +119,10 @@ export class BackgroundWorker {
 
         if (candidates.length === 0) {
           this.db.markBlockStatus(blockId, "done", now);
+          this.db.compactRawPayloadsForBlock(blockId);
+          if (!this.runtimeContext.botConfig.retainProcessedMedia) {
+            this.db.enqueueJob("prune_media", {}, now);
+          }
           return;
         }
 
@@ -103,8 +131,16 @@ export class BackgroundWorker {
           botId: this.runtimeContext.botConfig.botId,
           messages: candidates as Array<{ senderJid: string; isFromBot: boolean; text: string }>
         });
+        if (!job.leaseToken || !this.db.stillOwnsJobLease(job.id, job.leaseToken)) {
+          this.logger.warn("job lease was lost during block extraction", {
+            jobId: job.id,
+            blockId
+          });
+          return;
+        }
         await this.memoryService.applyExtractedMemories(memories, blockId, this.db.getBlockChatId(blockId), now);
         this.db.markBlockStatus(blockId, "done", now);
+        this.db.compactRawPayloadsForBlock(blockId);
         if (!this.runtimeContext.botConfig.retainProcessedMedia) {
           this.db.enqueueJob("prune_media", {}, now);
         }

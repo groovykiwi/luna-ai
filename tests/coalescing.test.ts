@@ -145,4 +145,49 @@ describe("turn coalescing", () => {
     ]);
   });
 
+  it("retries a failed turn and eventually clears the pending messages", async () => {
+    const root = createTempRoot();
+    roots.push(root);
+    const runtimeContext = createRuntimeContext(root);
+    const db = new LunaDb(runtimeContext.paths.dbPath, runtimeContext.rootConfig.busyTimeoutMs);
+    const transport = new MockTransport();
+    const logger = createLogger(`${runtimeContext.paths.logsDir}/chat-retry-test.log`, "chat-retry-test");
+
+    let attempts = 0;
+    class FlakyGateway extends FakeGateway {
+      override async generateReply(input: Parameters<FakeGateway["generateReply"]>[0]) {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("temporary upstream failure");
+        }
+
+        return super.generateReply(input);
+      }
+    }
+
+    const gateway = new FlakyGateway();
+    gateway.replyResult = {
+      reply: "recovered reply",
+      memoryOperations: []
+    };
+
+    const runtime = new ChatRuntime(runtimeContext, db, transport, gateway, logger);
+    await runtime.start();
+
+    await transport.push(
+      makeIncomingMessage({
+        externalId: "dm-retry-1",
+        text: "hello",
+        chatJid: "user@s.whatsapp.net",
+        senderJid: "user@s.whatsapp.net"
+      })
+    );
+
+    await waitFor(() => {
+      expect(transport.sent).toHaveLength(1);
+    }, 2_000);
+
+    expect(attempts).toBe(2);
+    expect(db.getPendingTurnMessages(1)).toHaveLength(0);
+  });
 });

@@ -282,7 +282,14 @@ export class BaileysTransport implements ChatTransport {
         });
 
         if (shouldReconnect) {
-          await this.connect(false);
+          try {
+            await this.connect(false);
+          } catch (error) {
+            this.logger.error("whatsapp reconnect failed", {
+              statusCode,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
         }
       }
     });
@@ -298,14 +305,22 @@ export class BaileysTransport implements ChatTransport {
       }
 
       for (const rawMessage of event.messages ?? []) {
-        const normalized = await this.normalizeIncomingMessage(rawMessage, {
-          requestId: typeof event?.requestId === "string" ? event.requestId : null
-        });
-        if (!normalized) {
-          continue;
-        }
+        try {
+          const normalized = await this.normalizeIncomingMessage(rawMessage, {
+            requestId: typeof event?.requestId === "string" ? event.requestId : null
+          });
+          if (!normalized) {
+            continue;
+          }
 
-        await this.onMessage(normalized);
+          await this.onMessage(normalized);
+        } catch (error) {
+          this.logger.error("failed to handle whatsapp inbound message", {
+            remoteJid: rawMessage?.key?.remoteJid ?? null,
+            externalId: rawMessage?.key?.id ?? null,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     });
 

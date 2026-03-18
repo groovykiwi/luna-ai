@@ -4,10 +4,6 @@ import type { LunaDb } from "./db.js";
 import type { LanguageGateway } from "./llm.js";
 import { rootConfig } from "./config.js";
 
-function normalizeFactKey(category: string, summary: string, details: string | null): string {
-  return `${category}::${summary.trim().toLowerCase()}::${(details ?? "").trim().toLowerCase()}`;
-}
-
 function buildArchiveQuery(input: string): string | null {
   const terms = Array.from(
     new Set(
@@ -45,7 +41,11 @@ export class MemoryService {
     }
 
     const embedding = await this.gateway.embedText(query);
-    const memories = this.db.searchActiveMemoriesByEmbedding(embedding, rootConfig.memorySearchLimit);
+    const memories = this.db.searchActiveMemoriesByEmbedding(
+      embedding,
+      rootConfig.memorySearchLimit,
+      rootConfig.memorySearchCandidateLimit
+    );
     const archiveQuery = memories.length < this.retrievalMinHits ? buildArchiveQuery(query) : null;
     const archiveHits = archiveQuery ? this.db.searchArchivedMessages(archiveQuery, rootConfig.rawArchiveSearchLimit) : [];
 
@@ -63,10 +63,9 @@ export class MemoryService {
     sourceChat: number | null;
     createdAt: string;
   }): Promise<number | null> {
-    const normalizedKey = normalizeFactKey(input.category, input.summary, input.details ?? null);
-    const duplicate = this.db
-      .listActiveMemories()
-      .find((memory) => normalizeFactKey(memory.category, memory.summary, memory.details) === normalizedKey);
+    const normalizedSummary = input.summary.trim().toLowerCase();
+    const normalizedDetails = (input.details ?? "").trim().toLowerCase();
+    const duplicate = this.db.findActiveMemoryByNormalizedKey(input.category, normalizedSummary, normalizedDetails);
 
     if (duplicate) {
       return duplicate.id;
@@ -75,7 +74,11 @@ export class MemoryService {
     const embeddingValues = await this.gateway.embedText(
       `${input.category}\n${input.summary}\n${input.details ?? ""}`.trim()
     );
-    const similar = this.db.searchActiveMemoriesByEmbedding(embeddingValues, 1)[0];
+    const similar = this.db.searchActiveMemoriesByEmbedding(
+      embeddingValues,
+      1,
+      rootConfig.memorySearchCandidateLimit
+    )[0];
     const memoryId = this.db.insertMemory(
       input.category,
       input.summary,

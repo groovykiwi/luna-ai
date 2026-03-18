@@ -1,3 +1,5 @@
+import { existsSync, writeFileSync } from "node:fs";
+
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BackgroundWorker } from "../src/worker.js";
@@ -38,6 +40,29 @@ describe("background worker", () => {
       .prepare("SELECT status FROM jobs WHERE id = ?")
       .get(jobId) as { status: string };
     expect(status.status).toBe("queued");
+  });
+
+  it("does not reclaim fresh running jobs on startup", () => {
+    const root = createTempRoot();
+    roots.push(root);
+    const runtimeContext = createRuntimeContext(root);
+    const db = createDb(root);
+    const gateway = new FakeGateway();
+    const logger = createLogger(`${runtimeContext.paths.logsDir}/worker-fresh.log`, "worker-fresh");
+    const now = new Date().toISOString();
+    const jobId = db.enqueueJob("reindex", {}, now);
+    db.connection
+      .prepare("UPDATE jobs SET status = 'running', started_at = ?, lease_token = 'fresh-lease' WHERE id = ?")
+      .run(now, jobId);
+
+    const worker = new BackgroundWorker(runtimeContext, db, gateway, logger);
+    expect(worker.initialize()).toBe(0);
+
+    const status = db.connection
+      .prepare("SELECT status, lease_token AS leaseToken FROM jobs WHERE id = ?")
+      .get(jobId) as { status: string; leaseToken: string | null };
+    expect(status.status).toBe("running");
+    expect(status.leaseToken).toBe("fresh-lease");
   });
 
   it("extracts only memory-eligible messages and marks blocks done on success", async () => {
@@ -162,9 +187,68 @@ describe("background worker", () => {
     const job = db.connection
       .prepare("SELECT status FROM jobs ORDER BY id ASC LIMIT 1")
       .get() as { status: string };
+    const rawPayload = db.connection
+      .prepare("SELECT raw_json AS rawJson FROM messages WHERE id = ?")
+      .get(ingest.messageId) as { rawJson: string };
 
     expect(block.status).toBe("failed");
     expect(block.extractionError).toContain("extract failed");
     expect(job.status).toBe("failed");
+    expect(rawPayload.rawJson).toBe("{\"compacted\":true}");
+  });
+
+  it("prunes failed media even when a closed block has no extraction candidates", async () => {
+    const root = createTempRoot();
+    roots.push(root);
+    const runtimeContext = createRuntimeContext(root);
+    const db = createDb(root);
+    const gateway = new FakeGateway();
+    const logger = createLogger(`${runtimeContext.paths.logsDir}/worker-prune-media.log`, "worker-prune-media");
+    const mediaPath = `${runtimeContext.paths.mediaDir}/failed-image.jpg`;
+    writeFileSync(mediaPath, "image-bytes");
+
+    const ingest = db.ingestMessage(
+      {
+        chatJid: "chat@s.whatsapp.net",
+        chatType: "dm",
+        senderJid: "user@s.whatsapp.net",
+        senderName: "User",
+        externalId: "image-1",
+        contentType: "image",
+        text: null,
+        imageDescription: null,
+        quotedExternalId: null,
+        mentions: [],
+        rawJson: "{\"provider\":\"payload\"}",
+        createdAt: "2026-03-17T10:00:00.000Z",
+        isFromBot: false,
+        mediaFilePath: mediaPath,
+        mediaMimeType: "image/jpeg",
+        mediaErrorMessage: "vision failed"
+      },
+      {
+        contextOnly: false,
+        memoryEligible: true,
+        wasTriggered: true,
+        turnEligible: true
+      },
+      1
+    );
+
+    const worker = new BackgroundWorker(runtimeContext, db, gateway, logger);
+    expect(await worker.runOnce()).toBe(true);
+    expect(await worker.runOnce()).toBe(true);
+
+    const media = db.connection
+      .prepare("SELECT status, error_message AS errorMessage FROM media WHERE message_id = ?")
+      .get(ingest.messageId) as { status: string; errorMessage: string | null };
+    const rawPayload = db.connection
+      .prepare("SELECT raw_json AS rawJson FROM messages WHERE id = ?")
+      .get(ingest.messageId) as { rawJson: string };
+
+    expect(media.status).toBe("pruned");
+    expect(media.errorMessage).toBe("vision failed");
+    expect(rawPayload.rawJson).toBe("{\"compacted\":true}");
+    expect(existsSync(mediaPath)).toBe(false);
   });
 });

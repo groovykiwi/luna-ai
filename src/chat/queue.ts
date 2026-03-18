@@ -11,7 +11,10 @@ export class TurnQueue {
 
   private activeChatId: number | null = null;
 
-  constructor(private readonly handler: (chatId: number) => Promise<boolean>) {}
+  constructor(
+    private readonly handler: (chatId: number) => Promise<boolean>,
+    private readonly onError?: (chatId: number, error: unknown) => void
+  ) {}
 
   enqueue(chatId: number): void {
     if (this.activeChatId === chatId) {
@@ -49,7 +52,12 @@ export class TurnQueue {
 
         this.pending.delete(chatId);
         this.activeChatId = chatId;
-        const hasMore = await this.handler(chatId);
+        let hasMore = false;
+        try {
+          hasMore = await this.handler(chatId);
+        } catch (error) {
+          this.onError?.(chatId, error);
+        }
         this.activeChatId = null;
 
         if (hasMore || this.requeue.has(chatId)) {
